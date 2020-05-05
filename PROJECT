@@ -1,0 +1,7 @@
+domain: easystack.io
+repo: easystack.io/vm-operator
+resources:
+- group: mixapp
+  kind: VirtualMachine
+  version: v1
+version: "2"

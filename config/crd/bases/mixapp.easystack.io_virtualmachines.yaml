@@ -1,0 +1,126 @@
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  creationTimestamp: null
+  name: virtualmachines.mixapp.easystack.io
+spec:
+  group: mixapp.easystack.io
+  names:
+    kind: VirtualMachine
+    listKind: VirtualMachineList
+    plural: virtualmachines
+    singular: virtualmachine
+  scope: ""
+  validation:
+    openAPIV3Schema:
+      description: VirtualMachine is the Schema for the virtualmachines API
+      properties:
+        apiVersion:
+          description: 'APIVersion defines the versioned schema of this representation
+            of an object. Servers should convert recognized schemas to the latest
+            internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+          type: string
+        kind:
+          description: 'Kind is a string value representing the REST resource this
+            object represents. Servers may infer this from the endpoint the client
+            submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+          type: string
+        metadata:
+          type: object
+        spec:
+          description: VirtualMachineSpec defines the desired state of VirtualMachine
+          properties:
+            assemblyPhase:
+              type: string
+            heatEvent:
+              items:
+                type: string
+              type: array
+            network:
+              properties:
+                existing_network:
+                  type: string
+                existing_subnet:
+                  type: string
+                external_network:
+                  type: string
+                floating_ip:
+                  type: string
+                floating_ip_bandwidth:
+                  type: string
+                neutron_az:
+                  type: string
+                private_network_cidr:
+                  type: string
+                private_network_name:
+                  type: string
+              type: object
+            project:
+              properties:
+                projectID:
+                  type: string
+              type: object
+            server:
+              properties:
+                admin_pass:
+                  type: string
+                availability_zone:
+                  type: string
+                boot_volume_size:
+                  type: string
+                boot_volume_type:
+                  type: string
+                flavor:
+                  type: string
+                image:
+                  type: string
+                key_name:
+                  type: string
+                name_prefix:
+                  type: string
+                replicas:
+                  format: int32
+                  type: integer
+                security_group:
+                  type: string
+              type: object
+            softwareConfig:
+              format: byte
+              type: string
+            stackID:
+              type: string
+            volume:
+              items:
+                properties:
+                  volume_name:
+                    type: string
+                  volume_size:
+                    type: string
+                  volume_type:
+                    type: string
+                type: object
+              type: array
+          type: object
+        status:
+          description: VirtualMachineStatus defines the observed state of VirtualMachine
+          properties:
+            vmStatus:
+              description: 'INSERT ADDITIONAL STATUS FIELD - define observed state
+                of cluster Important: Run "make" to regenerate code after modifying
+                this file'
+              type: string
+          type: object
+      type: object
+  version: v1
+  versions:
+  - name: v1
+    served: true
+    storage: true
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
