@@ -90,17 +90,20 @@ resources:
   # vitual machines
   #
 
+{% if softwareConfig %}
   software_config:
     type: OS::Heat::SoftwareConfig
     properties:
       group: ungrouped
-      config: {get_file: software_config.sh}
+      config: |
+        {{ softwareConfig }}
 
   node_bootstrap:
     type: OS::Heat::MultipartMime
     properties:
       parts:
         - config: {get_resource: software_config}
+{% endif %}
 
   node_boot_volume:
     type: OS::Cinder::Volume

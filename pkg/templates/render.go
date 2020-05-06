@@ -46,7 +46,7 @@ func (vt *VmTemplate) RenderToFile() error {
 			fmt.Printf("mkdir failed: %s", vt.DstTplDir)
 			return err
 		}
-		cookedTpl := strings.Join([]string{vt.DstTplDir, fName}, "/")
+		cookedTpl := strings.Join([]string{vt.DstTplDir, strings.TrimSuffix(fName, ".tpl")}, "/")
 		err = ioutil.WriteFile(cookedTpl, []byte(out), 0644)
 		if err != nil {
 			return err

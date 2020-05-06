@@ -35,6 +35,7 @@ import (
 	cli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks"
+	"os"
 	"reflect"
 )
 
@@ -283,6 +284,8 @@ func spec2HeatParams(spec interface{}, params *map[string]interface{}) error {
 				(*params)["floating_ip"] = v.Field(i).Interface()
 			case "FloatingIpBandwidth":
 				(*params)["floating_ip_bandwidth"] = v.Field(i).Interface()
+			case "SoftwareConfig":
+				(*params)["softwareConfig"] = v.Field(i).Interface()
 			default:
 				fmt.Println("Unknown spec field")
 			}
@@ -304,9 +307,16 @@ func (r *VirtualMachineReconciler) buildStackCreateOpts(ctx context.Context, nam
 		return nil, err
 	}
 
+	// stack use '.' as baseUrl, need to change work dir to tplDir
+	if err := os.Chdir(tplDir); err != nil {
+		fmt.Printf("change work dir to %s failed\n", tplDir)
+		return nil, err
+	}
+
 	template := &stacks.Template{}
-	tplUrl := strings.Join([]string{tplDir, "vm_group.yaml.tpl"}, "/")
-	fmt.Printf("tplUrl:%s\n", tplUrl)
+	tplUrl := strings.Join([]string{"file:/", tplDir, "vm_group.yaml"}, "/")
+	fmt.Printf("tplUrl = %s\n", tplUrl)
+
 	template.TE = stacks.TE{
 		URL: tplUrl,
 	}
