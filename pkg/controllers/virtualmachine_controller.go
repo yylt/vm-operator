@@ -58,7 +58,7 @@ type VirtualMachineReconciler struct {
 type vmCache struct {
 	mu sync.Mutex
 	// using stackname as key
-	vmMap map[string]vmv1.VirtualMachine
+	vmMap map[string]*vmv1.VirtualMachine
 }
 
 func NewVirtualMachine(c cli.Client, r cli.Reader, logger logr.Logger, oss *openstack.OSService, period int) *VirtualMachineReconciler {
@@ -67,7 +67,7 @@ func NewVirtualMachine(c cli.Client, r cli.Reader, logger logr.Logger, oss *open
 		cliReader:     r,
 		log:           logger,
 		osService:     oss,
-		vmCache:       &vmCache{vmMap: make(map[string]vmv1.VirtualMachine)},
+		vmCache:       &vmCache{vmMap: make(map[string]*vmv1.VirtualMachine)},
 		PollingPeriod: period,
 	}
 }
@@ -101,12 +101,19 @@ func (r *VirtualMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, err
 	if !ok {
 		// Add event
 		logger.Info("Add Event", "CRD Spec", vm.Spec)
-		createOpts, err := r.buildStackCreateOpts(ctx, req.Name, &vm)
+		createOpts, err := r.buildStackCreateOpts(ctx, &vm)
 		if err != nil {
 			return ctrl.Result{}, nil
 		}
-		r.osService.StackCreate(ctx, createOpts)
-		r.vmCache.set(vm.Name, vm)
+		stackID, err := r.osService.StackCreate(ctx, createOpts)
+		if err != nil {
+			logger.Error(err, "Create Stack failed")
+			vm.Status.VmStatus = openstack.S_CREATE_FAILED
+		}
+		vm.Status.StackID = stackID
+		vm.Status.VmStatus = openstack.S_CREATE_IN_PROGRESS
+		r.vmCache.set(vm.Name, &vm)
+		r.doUpdateVmCrdStatus(ctx, &vm)
 	} else {
 		// TODO: Update event
 		fmt.Printf("update event: %v\n", cached)
@@ -138,9 +145,9 @@ func (r *VirtualMachineReconciler) InitVmCacheFromCRD() error {
 	defer r.vmCache.mu.Unlock()
 	for i := range vmList.Items {
 		projectID := vmList.Items[i].Spec.Project.ProjectID
-		name := vmList.Items[i].Spec.Server.NamePrefix
-		key := strings.Join([]string{projectID, name}, "-")
-		r.vmCache.vmMap[key] = vmList.Items[i]
+		appName := vmList.Items[i].Spec.Server.NamePrefix
+		key := strings.Join([]string{appName, projectID}, "-")
+		r.vmCache.vmMap[key] = &vmList.Items[i]
 	}
 
 	return nil
@@ -178,16 +185,11 @@ func (r *VirtualMachineReconciler) PollingVmInfo() error {
 		}
 
 		for i := range vmList.Items {
-			vmStatus := vmList.Items[i].Status.VmStatus
-			if strings.HasSuffix(vmStatus, "COMPLETE") || strings.HasSuffix(vmStatus, "FAILED") {
-				continue
-			}
 			err := r.checkAndUpdate(ctx, &vmList.Items[i], stackMap)
 			if err != nil {
 				logger.Error(err, "Failed to update vm CRD")
 			}
 		}
-
 	}
 }
 
@@ -216,6 +218,18 @@ func (r *VirtualMachineReconciler) checkAndUpdate(ctx context.Context, vm *vmv1.
 	// 3. update vm status
 	if vm.Spec.AssemblyPhase == vmv1.Creating || vm.Spec.AssemblyPhase == vmv1.Updating {
 		vm.Status.VmStatus = stackStatus
+		switch stackStatus {
+		case openstack.S_CREATE_FAILED:
+			vm.Spec.AssemblyPhase = vmv1.Failed
+		case openstack.S_CREATE_COMPLETE:
+			vm.Spec.AssemblyPhase = vmv1.Succeeded
+		case openstack.S_UPDATE_FAILED:
+			vm.Spec.AssemblyPhase = vmv1.Failed
+		case openstack.S_UPDATE_COMPLETE:
+			vm.Spec.AssemblyPhase = vmv1.Succeeded
+		default:
+			fmt.Printf("Unknown stack status: %s\n", stackStatus)
+		}
 		return r.doUpdateVmCrdStatus(ctx, vm)
 	}
 
@@ -294,7 +308,7 @@ func spec2HeatParams(spec interface{}, params *map[string]interface{}) error {
 	return nil
 }
 
-func (r *VirtualMachineReconciler) buildStackCreateOpts(ctx context.Context, name string, vm *vmv1.VirtualMachine) (*stacks.CreateOpts, error) {
+func (r *VirtualMachineReconciler) buildStackCreateOpts(ctx context.Context, vm *vmv1.VirtualMachine) (*stacks.CreateOpts, error) {
 	params := make(map[string]interface{})
 	spec2HeatParams(&vm.Spec.Server, &params)
 	spec2HeatParams(&vm.Spec.Network, &params)
@@ -322,21 +336,21 @@ func (r *VirtualMachineReconciler) buildStackCreateOpts(ctx context.Context, nam
 	}
 
 	return &stacks.CreateOpts{
-		Name:         name,
+		Name:         vm.Name,
 		TemplateOpts: template,
 		Parameters:   params,
 		Tags:         []string{openstack.StackTag},
 	}, nil
 }
 
-func (v *vmCache) get(key string) (vmv1.VirtualMachine, bool) {
+func (v *vmCache) get(key string) (*vmv1.VirtualMachine, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	vm, ok := v.vmMap[key]
 	return vm, ok
 }
 
-func (v *vmCache) set(key string, vm vmv1.VirtualMachine) {
+func (v *vmCache) set(key string, vm *vmv1.VirtualMachine) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.vmMap[key] = vm

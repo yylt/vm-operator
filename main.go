@@ -85,7 +85,7 @@ func main() {
 	}
 
 	// periodically polling
-	//go vm.PollingVmInfo()
+	go vm.PollingVmInfo()
 
 	if err = vm.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")

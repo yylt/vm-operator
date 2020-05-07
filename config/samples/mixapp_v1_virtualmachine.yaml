@@ -1,7 +1,7 @@
 apiVersion: mixapp.easystack.io/v1
 kind: VirtualMachine
 metadata:
-  name: 2535ffda6f48477e98d6a1e6b5a19288-test-app
+  name: test-app-2535ffda6f48477e98d6a1e6b5a19288
 spec:
   # Add fields here
   project:
@@ -20,3 +20,4 @@ spec:
     external_network: "public_net"
     private_network_cidr: "192.168.18.0/24"
     private_network_name: "ecns-private"
+  assemblyPhase: "Creating"

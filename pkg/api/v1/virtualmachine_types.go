@@ -44,6 +44,7 @@ type VirtualMachineSpec struct {
 
 type ProjectSpec struct {
 	ProjectID string `json:"projectID,omitempty"`
+	Token     string `json:"token,omitempty"`
 }
 
 type ServerSpec struct {
@@ -80,6 +81,7 @@ type VolumeSpec struct {
 type VirtualMachineStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	StackID  string `json:"stackID,omitempty"`
 	VmStatus string `json:"vmStatus,omitempty"`
 }
 

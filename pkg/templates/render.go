@@ -43,7 +43,7 @@ func (vt *VmTemplate) RenderToFile() error {
 		// write render result to template file
 		err = os.MkdirAll(vt.DstTplDir, 0755)
 		if err != nil {
-			fmt.Printf("mkdir failed: %s", vt.DstTplDir)
+			fmt.Printf("mkdir failed: %s\n", vt.DstTplDir)
 			return err
 		}
 		cookedTpl := strings.Join([]string{vt.DstTplDir, strings.TrimSuffix(fName, ".tpl")}, "/")

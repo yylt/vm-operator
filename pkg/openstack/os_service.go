@@ -17,6 +17,15 @@ const (
 	StackTag   = "ecns-mixapp"
 )
 
+const (
+	S_CREATE_FAILED      = "CREATE_FAILED"
+	S_CREATE_IN_PROGRESS = "CREATE_IN_PROGRESS"
+	S_CREATE_COMPLETE    = "CREATE_IN_PROGRESS"
+	S_UPDATE_FAILED      = "UPDATE_FAILED"
+	S_UPDATE_IN_PROGRESS = "UPDATE_IN_PROGRESS"
+	S_UPDATE_COMPLETE    = "UPDATE_IN_PROGRESS"
+)
+
 type OSService struct {
 	AdminAuthOpt *gophercloud.AuthOptions
 	ClientCache  *ClientCache
