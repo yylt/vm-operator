@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"easystack.io/vm-operator/pkg/utils"
+	"errors"
 	"github.com/go-logr/logr"
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack"
@@ -78,31 +79,37 @@ func NewOSService(configDir string, logger logr.Logger) (*OSService, error) {
 	}, nil
 }
 
-func (oss *OSService) NewHeatClient(ctx context.Context, projectID string) error {
+func (oss *OSService) NewHeatClient(ctx context.Context, projectID string, token string) error {
 	logger := utils.GetLoggerOrDie(ctx)
 
-	var client *gophercloud.ServiceClient
-
 	if projectID == CLOUDADMIN {
-		provider, err := openstack.AuthenticatedClient(*oss.AdminAuthOpt)
-		if err != nil {
-			logger.Error(err, "Failed to Authenticate to OpenStack")
-			return err
-		}
-
-		client, err = openstack.NewOrchestrationV1(provider, gophercloud.EndpointOpts{Region: "RegionOne"})
-		if err != nil {
-			logger.Error(err, "Failed to init heat client")
-			return err
-		}
+		logger.Info("Already has cloudadmin client during initialization")
+		return nil
 	}
 
-	oss.ClientCache.clientMap[projectID] = client
+	authOpt := gophercloud.AuthOptions{
+		IdentityEndpoint: oss.AdminAuthOpt.IdentityEndpoint,
+		TokenID:          token,
+	}
+
+	provider, err := openstack.AuthenticatedClient(authOpt)
+	if err != nil {
+		logger.Error(err, "Failed to Authenticate to OpenStack")
+		return err
+	}
+
+	client, err := openstack.NewOrchestrationV1(provider, gophercloud.EndpointOpts{Region: "RegionOne"})
+	if err != nil {
+		logger.Error(err, "Failed to init heat client")
+		return err
+	}
+
+	oss.ClientCache.setClient(projectID, client)
 
 	return nil
 }
 
-func (oss *OSService) GetHeatClient(ctx context.Context, projectID string) (*gophercloud.ServiceClient, error) {
+func (oss *OSService) GetHeatClient(ctx context.Context, projectID string, token string) (*gophercloud.ServiceClient, error) {
 	defer oss.ClientCache.mu.Unlock()
 	oss.ClientCache.mu.Lock()
 
@@ -110,7 +117,7 @@ func (oss *OSService) GetHeatClient(ctx context.Context, projectID string) (*gop
 		return client, nil
 	}
 
-	err := oss.NewHeatClient(ctx, projectID)
+	err := oss.NewHeatClient(ctx, projectID, token)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +126,7 @@ func (oss *OSService) GetHeatClient(ctx context.Context, projectID string) (*gop
 }
 
 func (oss *OSService) StackListAll(ctx context.Context) ([]stacks.ListedStack, error) {
-	client, err := oss.GetHeatClient(ctx, CLOUDADMIN)
+	client, err := oss.GetHeatClient(ctx, CLOUDADMIN, "")
 	if err != nil {
 		fmt.Printf("Failed to get heat client for %s\n", CLOUDADMIN)
 		return nil, err
@@ -148,20 +155,20 @@ func doStackList(client *gophercloud.ServiceClient, listOpts stacks.ListOpts) ([
 	return stackList, nil
 }
 
-func (oss *OSService) StackCreate(ctx context.Context, createOpts *stacks.CreateOpts) (string, error) {
+func (oss *OSService) StackCreate(ctx context.Context, projectID string, createOpts *stacks.CreateOpts) (string, error) {
 	// cloudadmin is just for testing
 	// TODO: use credential of request project to identify
 	// if no credential cache found, create one for request project
-	client, err := oss.GetHeatClient(ctx, CLOUDADMIN)
+	client, err := oss.ClientCache.getClient(projectID)
 	if err != nil {
-		fmt.Printf("Failed to get heat client for %s\n", CLOUDADMIN)
+		fmt.Printf("Failed to get auth client from cache: %v\n", err)
 		return "", err
 	}
 
 	r := stacks.Create(client, createOpts)
 	if r.Err != nil {
 		fmt.Printf("Create stack failed with err: %v\n", r.Err)
-		return "", err
+		return "", r.Err
 	}
 
 	createdStack, err := r.Extract()
@@ -172,4 +179,27 @@ func (oss *OSService) StackCreate(ctx context.Context, createOpts *stacks.Create
 	fmt.Printf("Created Stack: %v", createdStack.ID)
 
 	return createdStack.ID, nil
+}
+
+func (c *ClientCache) getClient(key string) (*gophercloud.ServiceClient, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cli, ok := c.clientMap[key]
+	if !ok {
+		err := errors.New("client not found")
+		return nil, err
+	}
+	return cli, nil
+}
+
+func (c *ClientCache) setClient(key string, client *gophercloud.ServiceClient) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clientMap[key] = client
+}
+
+func (c *ClientCache) delClient(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.clientMap, key)
 }

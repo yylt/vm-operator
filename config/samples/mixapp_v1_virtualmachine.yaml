@@ -1,11 +1,12 @@
 apiVersion: mixapp.easystack.io/v1
 kind: VirtualMachine
 metadata:
-  name: test-app-2535ffda6f48477e98d6a1e6b5a19288
+  name: test-app-8e5eda4cac9f460ea2b471a357c42dd0
 spec:
   # Add fields here
   project:
-    projectID: "2535ffda6f48477e98d6a1e6b5a19288"
+    projectID: "8e5eda4cac9f460ea2b471a357c42dd0"
+    token: "gAAAAABes7ueQgb_EpiD7hhg7miC7uibqzt-Ce3Ly4ztQXJXwVZ-q5NdSdMSAhsJTxzd6flYTIeddJYLuxh7MsVs_qbpS7Ds8v27erZRRY8PQqe8xmwHlyCLOCfcv6FGHG7M-zIxIvM58NOKIGx_peC1kUl3UGb1x9QWbnn1HjzMQldpdN1tVvE"
   server:
     replicas: 1
     name_prefix: "test-app"

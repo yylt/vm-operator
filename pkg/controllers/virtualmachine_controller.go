@@ -105,7 +105,11 @@ func (r *VirtualMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, err
 		if err != nil {
 			return ctrl.Result{}, nil
 		}
-		stackID, err := r.osService.StackCreate(ctx, createOpts)
+		err = r.osService.NewHeatClient(ctx, vm.Spec.Project.ProjectID, vm.Spec.Project.Token)
+		if err != nil {
+			return ctrl.Result{}, nil
+		}
+		stackID, err := r.osService.StackCreate(ctx, vm.Spec.Project.ProjectID, createOpts)
 		if err != nil {
 			logger.Error(err, "Create Stack failed")
 			vm.Status.VmStatus = openstack.S_CREATE_FAILED
@@ -115,7 +119,7 @@ func (r *VirtualMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, err
 		r.vmCache.set(vm.Name, &vm)
 		r.doUpdateVmCrdStatus(ctx, &vm)
 	} else {
-		// TODO: Update event
+		// TODO: Update event, deal with vm update and delete
 		fmt.Printf("update event: %v\n", cached)
 	}
 
@@ -172,9 +176,10 @@ func (r *VirtualMachineReconciler) PollingVmInfo() error {
 		}
 
 		// transfer stack list to map
-		stackMap := make(map[string]*stacks.ListedStack)
-		for _, stack := range stackList {
-			stackMap[stack.Name] = &stack
+		var stackMap map[string]*stacks.ListedStack
+		stackMap = make(map[string]*stacks.ListedStack)
+		for i := range stackList {
+			stackMap[stackList[i].Name] = &stackList[i]
 		}
 
 		// Get all vm CRD
@@ -190,6 +195,7 @@ func (r *VirtualMachineReconciler) PollingVmInfo() error {
 				logger.Error(err, "Failed to update vm CRD")
 			}
 		}
+		stackMap = nil
 	}
 }
 
