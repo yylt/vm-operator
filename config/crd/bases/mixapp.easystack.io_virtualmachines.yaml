@@ -1,0 +1,255 @@
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.2.5
+  creationTimestamp: null
+  name: virtualmachines.mixapp.easystack.io
+spec:
+  group: mixapp.easystack.io
+  names:
+    kind: VirtualMachine
+    listKind: VirtualMachineList
+    plural: virtualmachines
+    singular: virtualmachine
+  scope: Namespaced
+  validation:
+    openAPIV3Schema:
+      description: VirtualMachine is the Schema for the virtualmachines API
+      properties:
+        apiVersion:
+          description: 'APIVersion defines the versioned schema of this representation
+            of an object. Servers should convert recognized schemas to the latest
+            internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+          type: string
+        kind:
+          description: 'Kind is a string value representing the REST resource this
+            object represents. Servers may infer this from the endpoint the client
+            submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+          type: string
+        metadata:
+          type: object
+        spec:
+          description: VirtualMachineSpec defines the desired state of VirtualMachine
+          properties:
+            assemblyPhase:
+              type: string
+            auth:
+              properties:
+                credentialID:
+                  type: string
+                credentialName:
+                  type: string
+                credentialSecret:
+                  type: string
+                projectID:
+                  type: string
+                token:
+                  type: string
+              type: object
+            loadbalance:
+              properties:
+                link:
+                  type: string
+                loadbalance_ip:
+                  type: string
+                name:
+                  type: string
+                port_map:
+                  items:
+                    properties:
+                      ips:
+                        items:
+                          type: string
+                        type: array
+                      port:
+                        format: int32
+                        type: integer
+                      protocol:
+                        type: string
+                    required:
+                    - port
+                    - protocol
+                    type: object
+                  type: array
+                subnet:
+                  properties:
+                    network_id:
+                      type: string
+                    network_name:
+                      type: string
+                    subnet_id:
+                      type: string
+                    subnet_name:
+                      type: string
+                  required:
+                  - subnet_id
+                  type: object
+              required:
+              - loadbalance_ip
+              - name
+              - subnet
+              type: object
+            server:
+              properties:
+                admin_pass:
+                  type: string
+                availability_zone:
+                  type: string
+                boot_image:
+                  type: string
+                boot_volume:
+                  properties:
+                    volume_delete:
+                      type: boolean
+                    volume_size:
+                      format: int32
+                      type: integer
+                    volume_type:
+                      type: string
+                  required:
+                  - volume_delete
+                  - volume_size
+                  - volume_type
+                  type: object
+                boot_volume_id:
+                  type: string
+                flavor:
+                  type: string
+                key_name:
+                  type: string
+                name:
+                  type: string
+                replicas:
+                  format: int32
+                  type: integer
+                security_groups:
+                  items:
+                    type: string
+                  type: array
+                subnet:
+                  properties:
+                    network_id:
+                      type: string
+                    network_name:
+                      type: string
+                    subnet_id:
+                      type: string
+                    subnet_name:
+                      type: string
+                  required:
+                  - subnet_id
+                  type: object
+                user_data:
+                  type: string
+                volumes:
+                  items:
+                    properties:
+                      volume_delete:
+                        type: boolean
+                      volume_size:
+                        format: int32
+                        type: integer
+                      volume_type:
+                        type: string
+                    required:
+                    - volume_delete
+                    - volume_size
+                    - volume_type
+                    type: object
+                  type: array
+              required:
+              - availability_zone
+              - flavor
+              - name
+              - replicas
+              - subnet
+              type: object
+          type: object
+        status:
+          description: VirtualMachineStatus defines the observed state of VirtualMachine
+          properties:
+            conditions:
+              items:
+                properties:
+                  lastUpdateTime:
+                    type: string
+                  reason:
+                    type: string
+                  status:
+                    type: string
+                  type:
+                    type: string
+                type: object
+              type: array
+            members:
+              items:
+                properties:
+                  creationTimestamp:
+                    type: string
+                  id:
+                    type: string
+                  ip:
+                    type: string
+                  name:
+                    type: string
+                  status:
+                    type: string
+                required:
+                - ip
+                type: object
+              type: array
+            netStatus:
+              properties:
+                hashid:
+                  type: string
+                name:
+                  type: string
+                phase:
+                  type: string
+                stackID:
+                  type: string
+                stackName:
+                  type: string
+                template:
+                  type: string
+              required:
+              - hashid
+              - name
+              type: object
+            vmStatus:
+              description: 'INSERT ADDITIONAL STATUS FIELD - define observed state
+                of cluster Important: Run "make" to regenerate code after modifying
+                this file'
+              properties:
+                hashid:
+                  type: string
+                name:
+                  type: string
+                phase:
+                  type: string
+                stackID:
+                  type: string
+                stackName:
+                  type: string
+                template:
+                  type: string
+              required:
+              - hashid
+              - name
+              type: object
+          type: object
+      type: object
+  version: v1
+  versions:
+  - name: v1
+    served: true
+    storage: true
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

@@ -1,0 +1,147 @@
+/*
+Copyright 2020 easystack.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package v1
+
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+type AssemblyPhaseType string
+
+const (
+	Creating AssemblyPhaseType = "Creating"
+	Updating AssemblyPhaseType = "Updating"
+	Deleting AssemblyPhaseType = "Deleting"
+)
+
+// VirtualMachineSpec defines the desired state of VirtualMachine
+type VirtualMachineSpec struct {
+	Auth          *AuthSpec         `json:"auth,omitempty"`
+	Server        *ServerSpec       `json:"server,omitempty"`
+	LoadBalance   *LoadBalanceSpec  `json:"loadbalance,omitempty"`
+	AssemblyPhase AssemblyPhaseType `json:"assemblyPhase,omitempty"`
+}
+
+type AuthSpec struct {
+	ProjectID        string `json:"projectID,omitempty"`
+	Token            string `json:"token,omitempty"`
+	CredentialID     string `json:"credentialID,omitempty"`
+	CredentialName   string `json:"credentialName,omitempty"`
+	CredentialSecret string `json:"credentialSecret,omitempty"`
+}
+
+type ServerSpec struct {
+	Replicas       int32         `json:"replicas"`
+	Name           string        `json:"name"`
+	BootImage      string        `json:"boot_image,omitempty"`
+	BootVolumeId   string        `json:"boot_volume_id,omitempty"`
+	Flavor         string        `json:"flavor"`
+	KeyName        string        `json:"key_name,omitempty"`
+	AdminPass      string        `json:"admin_pass,omitempty"`
+	BootVolume     *VolumeSpec   `json:"boot_volume,omitempty"`
+	Volumes        []*VolumeSpec `json:"volumes,omitempty"`
+	SecurityGroups []string      `json:"security_groups,omitempty"`
+	UserData       string        `json:"user_data,omitempty"`
+
+	AvailableZone string      `json:"availability_zone"`
+	Subnet        *SubnetSpec `json:"subnet"`
+}
+
+type LoadBalanceSpec struct {
+	Subnet *SubnetSpec `json:"subnet"`
+	LbIp   string      `json:"loadbalance_ip"`
+	Name   string      `json:"name"`
+	Ports  []*PortMap  `json:"port_map,omitempty"`
+	Link   string      `json:"link,omitempty"`
+}
+
+type SubnetSpec struct {
+	NetworkName string `json:"network_name,omitempty"`
+	NetworkId   string `json:"network_id,omitempty"`
+	SubnetName  string `json:"subnet_name,omitempty"`
+	SubnetId    string `json:"subnet_id"`
+}
+
+type VolumeSpec struct {
+	VolumeDeleteByVm bool   `json:"volume_delete"`
+	VolumeType       string `json:"volume_type"`
+	VolumeSize       int32  `json:"volume_size"`
+}
+
+type PortMap struct {
+	Ips      []string `json:"ips,omitempty"` //update by members or links
+	Port     int32    `json:"port"`
+	Protocol string   `json:"protocol"`
+}
+
+// VirtualMachineStatus defines the observed state of VirtualMachine
+type VirtualMachineStatus struct {
+	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
+	// Important: Run "make" to regenerate code after modifying this file
+	VmStatus   *ResourceStatus `json:"vmStatus,omitempty"`
+	NetStatus  *ResourceStatus `json:"netStatus,omitempty"`
+	Members    []*ServerStat   `json:"members,omitempty"`
+	Conditions []*Condition    `json:"conditions,omitempty"`
+}
+
+type Condition struct {
+	LastUpdateTime string `json:"lastUpdateTime,omitempty"`
+	Type           string `json:"type,omitempty"` //should add Ready type for application
+	Reason         string `json:"reason,omitempty"`
+	Status         string `json:"status,omitempty"`
+}
+
+type ServerStat struct {
+	Id         string `json:"id,omitempty"`
+	CreateTime string `json:"creationTimestamp,omitempty"`
+	Stat       string `json:"status,omitempty"`
+	Ip         string `json:"ip"`
+	Name       string `json:"name,omitempty"`
+}
+
+type ResourceStatus struct {
+	StackID   string `json:"stackID,omitempty"`
+	StackName string `json:"stackName,omitempty"`
+	HashId    string `json:"hashid"`
+	Name      string `json:"name"`
+	Stat      string `json:"phase,omitempty"`
+	Template  string `json:"template,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// VirtualMachine is the Schema for the virtualmachines API
+type VirtualMachine struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   VirtualMachineSpec   `json:"spec,omitempty"`
+	Status VirtualMachineStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// VirtualMachineList contains a list of VirtualMachine
+type VirtualMachineList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []VirtualMachine `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&VirtualMachine{}, &VirtualMachineList{})
+}
