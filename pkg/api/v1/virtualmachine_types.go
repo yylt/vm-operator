@@ -23,66 +23,103 @@ import (
 type AssemblyPhaseType string
 
 const (
-	Creating  AssemblyPhaseType = "Creating"
-	Updating                    = "Updating"
-	Deleting                    = "Deleting"
-	Succeeded                   = "Succeeded"
-	Failed                      = "Failed"
+	Creating AssemblyPhaseType = "Creating"
+	Updating AssemblyPhaseType = "Updating"
+	Deleting AssemblyPhaseType = "Deleting"
 )
 
 // VirtualMachineSpec defines the desired state of VirtualMachine
 type VirtualMachineSpec struct {
-	Project        ProjectSpec       `json:"project,omitempty"`
-	Server         ServerSpec        `json:"server,omitempty"`
-	Network        NetworkSpec       `json:"network,omitempty"`
-	Volume         []VolumeSpec      `json:"volume,omitempty"`
-	SoftwareConfig []byte            `json:"softwareConfig,omitempty"`
-	AssemblyPhase  AssemblyPhaseType `json:"assemblyPhase,omitempty"`
-	StackID        string            `json:"stackID,omitempty"`
-	HeatEvent      []string          `json:"heatEvent,omitempty"`
+	Auth          *AuthSpec         `json:"auth,omitempty"`
+	Server        *ServerSpec       `json:"server,omitempty"`
+	LoadBalance   *LoadBalanceSpec  `json:"loadbalance,omitempty"`
+	AssemblyPhase AssemblyPhaseType `json:"assemblyPhase,omitempty"`
 }
 
-type ProjectSpec struct {
-	ProjectID string `json:"projectID,omitempty"`
-	Token     string `json:"token,omitempty"`
+type AuthSpec struct {
+	ProjectID        string `json:"projectID,omitempty"`
+	Token            string `json:"token,omitempty"`
+	CredentialID     string `json:"credentialID,omitempty"`
+	CredentialName   string `json:"credentialName,omitempty"`
+	CredentialSecret string `json:"credentialSecret,omitempty"`
 }
 
 type ServerSpec struct {
-	Replicas       int32  `json:"replicas,omitempty"`
-	NamePrefix     string `json:"name_prefix,omitempty"`
-	Image          string `json:"image,omitempty"`
-	Flavor         string `json:"flavor,omitempty"`
-	AvailableZone  string `json:"availability_zone,omitempty"`
-	KeyName        string `json:"key_name,omitempty"`
-	AdminPass      string `json:"admin_pass,omitempty"`
-	BootVolumeType string `json:"boot_volume_type,omitempty"`
-	BootVolumeSize string `json:"boot_volume_size,omitempty"`
-	SecurityGroup  string `json:"security_group,omitempty"`
+	Replicas       int32         `json:"replicas"`
+	Name           string        `json:"name"`
+	BootImage      string        `json:"boot_image,omitempty"`
+	BootVolumeId   string        `json:"boot_volume_id,omitempty"`
+	Flavor         string        `json:"flavor"`
+	KeyName        string        `json:"key_name,omitempty"`
+	AdminPass      string        `json:"admin_pass,omitempty"`
+	BootVolume     *VolumeSpec   `json:"boot_volume,omitempty"`
+	Volumes        []*VolumeSpec `json:"volumes,omitempty"`
+	SecurityGroups []string      `json:"security_groups,omitempty"`
+	UserData       string        `json:"user_data,omitempty"`
+
+	AvailableZone string      `json:"availability_zone"`
+	Subnet        *SubnetSpec `json:"subnet"`
 }
 
-type NetworkSpec struct {
-	ExternalNetwork     string `json:"external_network,omitempty"`
-	ExistingNetwork     string `json:"existing_network,omitempty"`
-	ExistingSubnet      string `json:"existing_subnet,omitempty"`
-	PrivateNetworkCidr  string `json:"private_network_cidr,omitempty"`
-	PrivateNetworkName  string `json:"private_network_name,omitempty"`
-	NeutronAz           string `json:"neutron_az,omitempty"`
-	FloatingIp          string `json:"floating_ip,omitempty"`
-	FloatingIpBandwidth string `json:"floating_ip_bandwidth,omitempty"`
+type LoadBalanceSpec struct {
+	Subnet *SubnetSpec `json:"subnet"`
+	LbIp   string      `json:"loadbalance_ip"`
+	Name   string      `json:"name"`
+	Ports  []*PortMap  `json:"port_map,omitempty"`
+	Link   string      `json:"link,omitempty"`
+}
+
+type SubnetSpec struct {
+	NetworkName string `json:"network_name,omitempty"`
+	NetworkId   string `json:"network_id,omitempty"`
+	SubnetName  string `json:"subnet_name,omitempty"`
+	SubnetId    string `json:"subnet_id"`
 }
 
 type VolumeSpec struct {
-	VolumeName string `json:"volume_name,omitempty"`
-	VolumeType string `json:"volume_type,omitempty"`
-	VolumeSize string `json:"volume_size,omitempty"`
+	VolumeDeleteByVm bool   `json:"volume_delete"`
+	VolumeType       string `json:"volume_type"`
+	VolumeSize       int32  `json:"volume_size"`
+}
+
+type PortMap struct {
+	Ips      []string `json:"ips,omitempty"` //update by members or links
+	Port     int32    `json:"port"`
+	Protocol string   `json:"protocol"`
 }
 
 // VirtualMachineStatus defines the observed state of VirtualMachine
 type VirtualMachineStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	StackID  string `json:"stackID,omitempty"`
-	VmStatus string `json:"vmStatus,omitempty"`
+	VmStatus   *ResourceStatus `json:"vmStatus,omitempty"`
+	NetStatus  *ResourceStatus `json:"netStatus,omitempty"`
+	Members    []*ServerStat   `json:"members,omitempty"`
+	Conditions []*Condition    `json:"conditions,omitempty"`
+}
+
+type Condition struct {
+	LastUpdateTime string `json:"lastUpdateTime,omitempty"`
+	Type           string `json:"type,omitempty"` //should add Ready type for application
+	Reason         string `json:"reason,omitempty"`
+	Status         string `json:"status,omitempty"`
+}
+
+type ServerStat struct {
+	Id         string `json:"id,omitempty"`
+	CreateTime string `json:"creationTimestamp,omitempty"`
+	Stat       string `json:"status,omitempty"`
+	Ip         string `json:"ip"`
+	Name       string `json:"name,omitempty"`
+}
+
+type ResourceStatus struct {
+	StackID   string `json:"stackID,omitempty"`
+	StackName string `json:"stackName,omitempty"`
+	HashId    string `json:"hashid"`
+	Name      string `json:"name"`
+	Stat      string `json:"phase,omitempty"`
+	Template  string `json:"template,omitempty"`
 }
 
 // +kubebuilder:object:root=true

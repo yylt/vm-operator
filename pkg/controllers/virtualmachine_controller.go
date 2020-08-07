@@ -18,112 +18,38 @@ package controllers
 
 import (
 	"context"
-	"fmt"
-	"strings"
-	"sync"
 	"time"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
-	"easystack.io/vm-operator/pkg/openstack"
-	vmtpl "easystack.io/vm-operator/pkg/templates"
-	"easystack.io/vm-operator/pkg/utils"
 	"github.com/go-logr/logr"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	cli "sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks"
-	"os"
-	"reflect"
 )
 
-const (
-	loggerCtxKey = "logger"
-	tplOutBase   = "/tmp/vm-templates"
+var (
+	defaultTimeout = time.Second * 5
 )
 
 // VirtualMachineReconciler reconciles a VirtualMachine object
 type VirtualMachineReconciler struct {
-	client        cli.Client
-	cliReader     cli.Reader
-	log           logr.Logger
-	scheme        *runtime.Scheme
-	osService     *openstack.OSService
-	vmCache       *vmCache
-	PollingPeriod int
+	cli.Client
+	logger    logr.Logger
+	scheme    *runtime.Scheme
+	ctx       context.Context
+	osService *OSService
 }
 
-type vmCache struct {
-	mu sync.Mutex
-	// using stackname as key
-	vmMap map[string]*vmv1.VirtualMachine
-}
-
-func NewVirtualMachine(c cli.Client, r cli.Reader, logger logr.Logger, oss *openstack.OSService, period int) *VirtualMachineReconciler {
+func NewVirtualMachine(c cli.Client, r cli.Reader, logger logr.Logger, oss *OSService) *VirtualMachineReconciler {
 	return &VirtualMachineReconciler{
-		client:        c,
-		cliReader:     r,
-		log:           logger,
-		osService:     oss,
-		vmCache:       &vmCache{vmMap: make(map[string]*vmv1.VirtualMachine)},
-		PollingPeriod: period,
+		Client:    c,
+		logger:    logger,
+		ctx:       context.Background(),
+		osService: oss,
 	}
-}
-
-// +kubebuilder:rbac:groups=mixapp.easystack.io,resources=virtualmachines,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=mixapp.easystack.io,resources=virtualmachines/status,verbs=get;update;patch
-
-func (r *VirtualMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
-	rootCtx := context.Background()
-	logger := r.log.WithValues("Reconcile", req.NamespacedName)
-	ctx := context.WithValue(rootCtx, loggerCtxKey, logger)
-
-	var vm vmv1.VirtualMachine
-	err := r.cliReader.Get(ctx, req.NamespacedName, &vm)
-	if err != nil {
-		if apierrs.IsNotFound(err) {
-			// Delete event
-			logger.Info("Delete Event", "vm crd has been deleted")
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, err
-	}
-
-	// vm is in the process of being deleted, so no need to do anything.
-	if vm.DeletionTimestamp != nil {
-		logger.Info("Delete Event", "vm crd is in the process of being deleted")
-		return ctrl.Result{}, nil
-	}
-
-	cached, ok := r.vmCache.get(vm.Name)
-	if !ok {
-		// Add event
-		logger.Info("Add Event", "CRD Spec", vm.Spec)
-		createOpts, err := r.buildStackCreateOpts(ctx, &vm)
-		if err != nil {
-			return ctrl.Result{}, nil
-		}
-		err = r.osService.NewHeatClient(ctx, vm.Spec.Project.ProjectID, vm.Spec.Project.Token)
-		if err != nil {
-			return ctrl.Result{}, nil
-		}
-		stackID, err := r.osService.StackCreate(ctx, vm.Spec.Project.ProjectID, createOpts)
-		if err != nil {
-			logger.Error(err, "Create Stack failed")
-			vm.Status.VmStatus = openstack.S_CREATE_FAILED
-		}
-		vm.Status.StackID = stackID
-		vm.Status.VmStatus = openstack.S_CREATE_IN_PROGRESS
-		r.vmCache.set(vm.Name, &vm)
-		r.doUpdateVmCrdStatus(ctx, &vm)
-	} else {
-		// TODO: Update event, deal with vm update and delete
-		fmt.Printf("update event: %v\n", cached)
-	}
-
-	return ctrl.Result{}, nil
 }
 
 func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -132,238 +58,67 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *VirtualMachineReconciler) InitVmCacheFromCRD() error {
-	rootCtx := context.Background()
-	logger := r.log.WithName("InitCRD")
-	ctx := context.WithValue(rootCtx, loggerCtxKey, logger)
+// +kubebuilder:rbac:groups=mixapp.easystack.io,resources=virtualmachines,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=mixapp.easystack.io,resources=virtualmachines/status,verbs=get;update;patch
 
-	var vmList vmv1.VirtualMachineList
+func (r *VirtualMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
+	var (
+		vm   vmv1.VirtualMachine
+		err  error
+		stat *vmv1.VirtualMachineStatus
+	)
 
-	err := r.cliReader.List(ctx, &vmList)
+	err = r.Get(r.ctx, req.NamespacedName, &vm)
 	if err != nil {
-		logger.Error(err, "Failed to list vm crd")
-		return err
-	}
-
-	r.vmCache.mu.Lock()
-	defer r.vmCache.mu.Unlock()
-	for i := range vmList.Items {
-		projectID := vmList.Items[i].Spec.Project.ProjectID
-		appName := vmList.Items[i].Spec.Server.NamePrefix
-		key := strings.Join([]string{appName, projectID}, "-")
-		r.vmCache.vmMap[key] = &vmList.Items[i]
-	}
-
-	return nil
-}
-
-func (r *VirtualMachineReconciler) PollingVmInfo() error {
-	rootCtx := context.Background()
-	logger := r.log.WithName("Polling")
-	ctx := context.WithValue(rootCtx, loggerCtxKey, logger)
-
-	var vmList vmv1.VirtualMachineList
-
-	for {
-		time.Sleep(time.Duration(r.PollingPeriod) * time.Second)
-		fmt.Println("start polling vm latest info")
-
-		// Get all VM Stacks
-		stackList, err := r.osService.StackListAll(ctx)
-		if err != nil {
-			logger.Error(err, "failed to list stacks")
-			continue
+		if apierrs.IsNotFound(err) {
+			// Delete event
+			r.logger.Info("object had deleted", "object", req.String(), "vm", vm)
+			return ctrl.Result{}, nil
 		}
-
-		// transfer stack list to map
-		var stackMap map[string]*stacks.ListedStack
-		stackMap = make(map[string]*stacks.ListedStack)
-		for i := range stackList {
-			stackMap[stackList[i].Name] = &stackList[i]
-		}
-
-		// Get all vm CRD
-		err = r.cliReader.List(ctx, &vmList)
-		if err != nil {
-			logger.Error(err, "Failed to list vm crd")
-			continue
-		}
-
-		for i := range vmList.Items {
-			err := r.checkAndUpdate(ctx, &vmList.Items[i], stackMap)
-			if err != nil {
-				logger.Error(err, "Failed to update vm CRD")
-			}
-		}
-		stackMap = nil
+		r.logger.Error(err, "get object deleted")
 	}
-}
-
-func (r *VirtualMachineReconciler) checkAndUpdate(ctx context.Context, vm *vmv1.VirtualMachine, stackMap map[string]*stacks.ListedStack) error {
-	key := vm.Name
-	stackStatus := stackMap[key].Status
-	// 1. if vm status not changed, ingore this time
-	if vm.Status.VmStatus == stackStatus {
-		fmt.Printf("vm[%s] of project[%s] didn't change status, nothing to update", vm.Name, vm.Spec.Project.ProjectID)
-		return nil
-	}
-
-	// 2. remove vm crd if phase is deleting and stack not found
-	if vm.Spec.AssemblyPhase == vmv1.Deleting {
-		if _, ok := stackMap[key]; !ok {
-			err := r.client.Delete(ctx, vm)
-			if err != nil {
-				fmt.Printf("Failed to delete crd %s\n", vm.Name)
-				return err
-			}
-			r.vmCache.del(key)
-			return nil
-		}
-	}
-
-	// 3. update vm status
-	if vm.Spec.AssemblyPhase == vmv1.Creating || vm.Spec.AssemblyPhase == vmv1.Updating {
-		vm.Status.VmStatus = stackStatus
-		switch stackStatus {
-		case openstack.S_CREATE_FAILED:
-			vm.Spec.AssemblyPhase = vmv1.Failed
-		case openstack.S_CREATE_COMPLETE:
-			vm.Spec.AssemblyPhase = vmv1.Succeeded
-		case openstack.S_UPDATE_FAILED:
-			vm.Spec.AssemblyPhase = vmv1.Failed
-		case openstack.S_UPDATE_COMPLETE:
-			vm.Spec.AssemblyPhase = vmv1.Succeeded
+	if vm.DeletionTimestamp != nil {
+		r.logger.Info("object is deleting", "object", req.String())
+		stat = r.osService.Delete(&vm.Spec, vm.Status.DeepCopy())
+	} else {
+		r.logger.Info("start Reconcile", "object", req.String())
+		switch vm.Spec.AssemblyPhase {
+		case vmv1.Creating:
+			fallthrough
+		case vmv1.Updating:
+			stat, err = r.osService.Reconcile(&vm)
+		case vmv1.Deleting:
+			stat = r.osService.Delete(&vm.Spec, vm.Status.DeepCopy())
 		default:
-			fmt.Printf("Unknown stack status: %s\n", stackStatus)
 		}
-		return r.doUpdateVmCrdStatus(ctx, vm)
 	}
-
-	return nil
+	r.logger.Info("wait reconcile next", "object", req.String())
+	if stat == nil {
+		return ctrl.Result{}, err
+	}
+	//stat.DeepCopyInto(&vm.Status)
+	err = r.doUpdateVmCrdStatus(req.NamespacedName, stat)
+	return ctrl.Result{}, err
 }
 
-func (r *VirtualMachineReconciler) doUpdateVmCrdStatus(ctx context.Context, vm *vmv1.VirtualMachine) error {
-	logger := utils.GetLoggerOrDie(ctx)
-
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if err := r.client.Update(ctx, vm); err != nil {
-			logger.Error(err, "Failed to update VM CRD")
+func (r *VirtualMachineReconciler) doUpdateVmCrdStatus(nsname types.NamespacedName, stat *vmv1.VirtualMachineStatus) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		original := &vmv1.VirtualMachine{}
+		if err := r.Get(r.ctx, nsname, original); err != nil {
+			r.logger.Error(err, "get object failed", "object", nsname.String())
 			return err
 		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("failed to update VM %s: %v", vm.Name, err)
-	}
-	return nil
-}
-
-func spec2HeatParams(spec interface{}, params *map[string]interface{}) error {
-	t := reflect.TypeOf(spec)
-	v := reflect.ValueOf(spec)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-		v = v.Elem()
-	}
-
-	if t.Kind() == reflect.Struct {
-		for i := 0; i < t.NumField(); i++ {
-			switch t.Field(i).Name {
-			case "Replicas":
-				(*params)["replicas"] = v.Field(i).Interface()
-			case "NamePrefix":
-				(*params)["replicas"] = v.Field(i).Interface()
-			case "Image":
-				(*params)["image"] = v.Field(i).Interface()
-			case "Flavor":
-				(*params)["flavor"] = v.Field(i).Interface()
-			case "AvailableZone":
-				(*params)["availability_zone"] = v.Field(i).Interface()
-			case "KeyName":
-				(*params)["key_name"] = v.Field(i).Interface()
-			case "AdminPass":
-				(*params)["admin_pass"] = v.Field(i).Interface()
-			case "BootVolumeType":
-				(*params)["boot_volume_type"] = v.Field(i).Interface()
-			case "BootVolumeSize":
-				(*params)["boot_volume_size"] = v.Field(i).Interface()
-			case "SecurityGroup":
-				(*params)["security_group"] = v.Field(i).Interface()
-			case "ExternalNetwork":
-				(*params)["external_network"] = v.Field(i).Interface()
-			case "ExistingNetwork":
-				(*params)["existing_network"] = v.Field(i).Interface()
-			case "ExistingSubnet":
-				(*params)["existing_subnet"] = v.Field(i).Interface()
-			case "PrivateNetworkCidr":
-				(*params)["private_network_cidr"] = v.Field(i).Interface()
-			case "PrivateNetworkName":
-				(*params)["private_network_name"] = v.Field(i).Interface()
-			case "NeutronAz":
-				(*params)["neutron_az"] = v.Field(i).Interface()
-			case "FloatingIp":
-				(*params)["floating_ip"] = v.Field(i).Interface()
-			case "FloatingIpBandwidth":
-				(*params)["floating_ip_bandwidth"] = v.Field(i).Interface()
-			case "SoftwareConfig":
-				(*params)["softwareConfig"] = v.Field(i).Interface()
-			default:
-				fmt.Println("Unknown spec field")
+		original.Status = *stat
+		if original.DeletionTimestamp != nil {
+			original.Finalizers = nil
+			r.logger.Info("delete finalizers")
+			return r.Update(r.ctx, original)
+		} else {
+			if original.Finalizers == nil {
+				original.Finalizers = append(original.Finalizers, nsname.String())
+				r.logger.Info("set finalizers")
 			}
+			return r.Update(r.ctx, original)
 		}
-	}
-	return nil
-}
-
-func (r *VirtualMachineReconciler) buildStackCreateOpts(ctx context.Context, vm *vmv1.VirtualMachine) (*stacks.CreateOpts, error) {
-	params := make(map[string]interface{})
-	spec2HeatParams(&vm.Spec.Server, &params)
-	spec2HeatParams(&vm.Spec.Network, &params)
-
-	tplDir := strings.Join([]string{tplOutBase, vm.Name}, "/")
-	tpl := vmtpl.New(r.osService.ConfigDir, tplDir, params)
-	err := tpl.RenderToFile()
-	if err != nil {
-		fmt.Println("render heat template file failed")
-		return nil, err
-	}
-
-	// stack use '.' as baseUrl, need to change work dir to tplDir
-	if err := os.Chdir(tplDir); err != nil {
-		fmt.Printf("change work dir to %s failed\n", tplDir)
-		return nil, err
-	}
-
-	template := &stacks.Template{}
-	tplUrl := strings.Join([]string{"file:/", tplDir, "vm_group.yaml"}, "/")
-	fmt.Printf("tplUrl = %s\n", tplUrl)
-
-	template.TE = stacks.TE{
-		URL: tplUrl,
-	}
-
-	return &stacks.CreateOpts{
-		Name:         vm.Name,
-		TemplateOpts: template,
-		Parameters:   params,
-		Tags:         []string{openstack.StackTag},
-	}, nil
-}
-
-func (v *vmCache) get(key string) (*vmv1.VirtualMachine, bool) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	vm, ok := v.vmMap[key]
-	return vm, ok
-}
-
-func (v *vmCache) set(key string, vm *vmv1.VirtualMachine) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.vmMap[key] = vm
-}
-
-func (v *vmCache) del(key string) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	delete(v.vmMap, key)
+	})
 }

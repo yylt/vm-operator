@@ -18,22 +18,30 @@ package main
 
 import (
 	"flag"
+	"math/rand"
 	"os"
-
-	"k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"time"
 
 	mixappv1 "easystack.io/vm-operator/pkg/api/v1"
 	"easystack.io/vm-operator/pkg/controllers"
-	osservice "easystack.io/vm-operator/pkg/openstack"
+
+	uberzap "go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 var (
-	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
+	scheme                  = runtime.NewScheme()
+	setupLog                = ctrl.Log.WithName("setup")
+	metricsAddr, healthAddr string
+	enableLeaderElection    bool
+	nettpl, vmtpl, tmpdir   string
+	podperiod, syncperiod   int64
+	level, identify         string
 )
 
 func init() {
@@ -41,59 +49,79 @@ func init() {
 
 	_ = mixappv1.AddToScheme(scheme)
 	// +kubebuilder:scaffold:scheme
+
+}
+
+func setlevel(st string) uberzap.AtomicLevel {
+	var lvl zapcore.Level
+	switch st {
+	case "debug":
+		lvl = zapcore.DebugLevel
+	case "info":
+		lvl = zapcore.InfoLevel
+	case "warn":
+		lvl = zapcore.WarnLevel
+	case "error":
+		lvl = zapcore.ErrorLevel
+	default:
+		lvl = zapcore.InfoLevel
+	}
+	return uberzap.NewAtomicLevelAt(lvl)
 }
 
 func main() {
-	var metricsAddr string
-	var enableLeaderElection bool
-	var configDir string
-	var pollingPeriod int
-
-	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
+	flag.BoolVar(&enableLeaderElection, "enable-leader-election", true,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flag.StringVar(&metricsAddr, "metrics-addr", "127.0.0.1:9446", "The address the metric endpoint binds to.")
-	flag.StringVar(&configDir, "config-dir", "/etc/vm-operator", "Operator config dir")
-	flag.IntVar(&pollingPeriod, "polling-period", 5, "Polling period of vm status.")
+	flag.StringVar(&level, "level", "info", "log level, debug, info, warn, error")
+	flag.StringVar(&metricsAddr, "metrics-addr", "127.0.0.1:9448", "The address the metric endpoint binds to.")
+	flag.StringVar(&healthAddr, "health-addr", "", "The address the health endpoint binds to.")
+	flag.StringVar(&nettpl, "net-tpl", "/opt/network.tpl", "net tpl file path")
+	flag.StringVar(&vmtpl, "vm-tpl", "/opt/vm.tpl", "vm tpl file path")
+	flag.StringVar(&tmpdir, "tmp-dir", "/tmp", "tmp dir ,should can write ")
+	flag.StringVar(&identify, "identify-addr", "http://keystone-api.openstack.svc.cluster.local/v3", "identify address.")
+
+	flag.Int64Var(&syncperiod, "sync-period", 120, "sync time duration second")
+	flag.Int64Var(&podperiod, "pod-period", 60, "sync time duration second")
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+	rand.Seed(time.Now().UnixNano())
 
-	oss, err := osservice.NewOSService(configDir, ctrl.Log.WithName("VM"))
+	lvl := setlevel(level)
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true), zap.Level(&lvl)))
+
+	sync := time.Duration(int64(time.Second) * syncperiod)
+	opt := ctrl.Options{
+		SyncPeriod:             &sync,
+		HealthProbeBindAddress: healthAddr,
+		Scheme:                 scheme,
+		MetricsBindAddress:     metricsAddr,
+		Port:                   9446,
+		LeaderElection:         enableLeaderElection,
+	}
+
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), opt)
 	if err != nil {
-		setupLog.Error(err, "unable to init openstack service")
+		setupLog.Error(err, "unable to create manager")
 		os.Exit(1)
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: metricsAddr,
-		Port:               9446,
-		LeaderElection:     enableLeaderElection,
-	})
+	client, err := dynamic.NewForConfig(ctrl.GetConfigOrDie())
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "unable to create dynamic client")
 		os.Exit(1)
 	}
 
-	vm := controllers.NewVirtualMachine(mgr.GetClient(), mgr.GetAPIReader(), ctrl.Log.WithName("VM"), oss, pollingPeriod)
-	// init vm cache from crd info
-	err = vm.InitVmCacheFromCRD()
-	if err != nil {
-		setupLog.Error(err, "failed to init vm cache")
-		os.Exit(1)
-	}
+	synck8s := controllers.NewPodIp(time.Duration(int64(time.Second)*podperiod), ctrl.Log, client)
+	oss := controllers.NewOSService(nettpl, vmtpl, tmpdir, identify, synck8s, ctrl.Log)
 
-	// periodically polling
-	go vm.PollingVmInfo()
-
+	vm := controllers.NewVirtualMachine(mgr.GetClient(), mgr.GetAPIReader(), ctrl.Log, oss)
 	if err = vm.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
+		setupLog.Error(err, "unable to setup manager")
 		os.Exit(1)
 	}
 
 	// +kubebuilder:scaffold:builder
-
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")

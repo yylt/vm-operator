@@ -1,0 +1,31 @@
+name: ci
+on:
+  push:
+    branches: [ dev ]
+
+env:
+  GO111MODULE: on
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Go 1.x
+        uses: actions/setup-go@v2
+        with:
+          go-version: ^1.14
+
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          repository: yylt/vm-operator
+          ref: ${{ github.ref }}
+          path: src/easystack.io/vm-operator
+
+      - name: build
+        run: |
+          echo "::set-env name=GOPATH::${{ github.workspace }}"
+          make
+        working-directory: src/easystack.io/vm-operator
+

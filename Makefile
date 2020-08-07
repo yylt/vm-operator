@@ -11,11 +11,20 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
-all: manager
+all: build
 
 # Run tests
 test: generate fmt vet manifests
 	go test ./... -coverprofile cover.out
+
+# Build manager binary
+build: generate fmt vet copy
+	go build -o bin/manager main.go
+
+copy:
+	mkdir -p bin
+	cp pkg/template/files/* bin/
+	cp config/crd/bases/* bin/
 
 # Build manager binary
 manager: generate fmt vet

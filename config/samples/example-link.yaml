@@ -1,0 +1,19 @@
+apiVersion: mixapp.easystack.io/v1
+kind: VirtualMachine
+metadata:
+  name: test-ap
+  namespace: application
+spec:
+  auth:
+    projectID: "debb3a36af9c40a1a7438463951802cd"
+    token: ""
+  loadbalance:
+    link: "/apis/apps/v1/namespaces/yyx/deployments/test"
+    subnet:
+      subnet_id: "eks-test"
+    loadbalance_ip: "10.0.15.2"
+    name: "net"
+    port_map:
+      - port: 443
+        protocol: "TCP"
+  assemblyPhase: "Creating"
