@@ -21,6 +21,7 @@ import (
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks"
 	"github.com/tidwall/gjson"
+	corev1 "k8s.io/api/core/v1"
 )
 
 var (
@@ -48,7 +49,10 @@ const (
 
 	Succeeded = "Succeeded"
 	Failed    = "Failed"
-	Running   = "Running"
+
+	CheckStep  = "Check"
+	ServerStep = "Server"
+	LbStep     = "Loadbalance"
 )
 
 type OSService struct {
@@ -91,22 +95,23 @@ func (oss *OSService) validOpenstack(spec *vmv1.VirtualMachineSpec) error {
 	if &spec == nil {
 		return fmt.Errorf("spec not define")
 	}
+
 	return nil
 }
 
-func (oss *OSService) addIps(members []*vmv1.ServerStat, ips ...string) {
+func (oss *OSService) addMembersByIps(netstat *vmv1.VirtualMachineStatus, ips ...string) {
 	if len(ips) == 0 {
 		return
 	}
 	var ipmap = make(map[string]struct{}, len(ips))
-	for _, member := range members {
+	for _, member := range netstat.Members {
 		ipmap[member.Ip] = struct{}{}
 	}
 	for _, ip := range ips {
 		if _, ok := ipmap[ip]; ok {
 			continue
 		}
-		members = append(members, &vmv1.ServerStat{
+		netstat.Members = append(netstat.Members, &vmv1.ServerStat{
 			Ip: ip,
 		})
 	}
@@ -140,60 +145,79 @@ func (oss *OSService) generateTmpFile(tpl string, spec *vmv1.VirtualMachineSpec)
 
 func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineStatus, error) {
 	var (
-		err      error
-		done     bool
-		syncnet  bool
-		tmpfpath string
+		err             error
+		done            bool
+		syncnet         bool
+		tmpfpath        string
+		reason, errType string
 	)
 	newspec := vm.Spec.DeepCopy()
 	newstat := vm.Status.DeepCopy()
 
 	netspec := newspec.LoadBalance
+	defer func() {
+		oss.setcondition(newstat, errType, err)
+		if err == nil {
+			reason = errType
+		} else {
+			reason = err.Error()
+		}
+		oss.setReadyCondition(newstat, done, reason)
+	}()
+	errType = CheckStep
 
 	err = oss.validOpenstack(newspec)
 	if err != nil {
 		oss.logger.Error(err, "spec is not valid!")
 		return nil, err
 	}
-
+	if newspec.Server == nil && netspec == nil {
+		err = fmt.Errorf("Not found server and loadbalance spec")
+		return newstat, err
+	}
 	tmpfpath, err = oss.generateTmpFile(oss.vmtpl, newspec)
 	if err != nil {
 		oss.logger.Error(err, "generate computer template failed")
 		return nil, err
 	}
-
+	errType = ServerStep
 	if newspec.Server != nil {
-		oss.logger.Info("start sync server", "name", newspec.Server.Name)
-		done, err = oss.syncComputer(tmpfpath, newspec, newstat)
-		if err != nil {
-			oss.logger.Error(err, "set condition", "name", newspec.Server.Name)
-			oss.setcondition(newstat, "server", err)
+		if newspec.Server.BootImage == "" && newspec.Server.BootVolumeId == "" {
+			err = fmt.Errorf("boot image and boot volume should not null both!")
+			return newstat, err
 		}
+		oss.logger.Info("start sync openstack server", "server-name", newspec.Server.Name)
+		done, err = oss.syncComputer(tmpfpath, newspec, newstat)
+		oss.setcondition(newstat, errType, err)
 		if netspec == nil || netspec.Link == "" {
-			oss.syncServers(newspec, newstat)
+			oss.logger.Info("add members from openstack server", "server-name", newspec.Server.Name)
+			err = oss.addMembersByServers(newspec, newstat)
+			if err != nil {
+				return newstat, err
+			}
 		}
 	}
 
 	if netspec == nil {
 		return newstat, nil
 	}
-	if !oss.podsync.LbExist(netspec.LbIp) {
-		portmap := make(map[int32]string)
-		for _, portm := range netspec.Ports {
-			portmap[portm.Port] = portm.Protocol
+	if netspec.Link != "" {
+		if !oss.podsync.LbExist(netspec.LbIp) {
+			portmap := make(map[int32]string)
+			for _, portm := range netspec.Ports {
+				portmap[portm.Port] = portm.Protocol
+			}
+			oss.podsync.AddLinks(netspec.LbIp, netspec.Link, portmap)
 		}
-		oss.podsync.AddLinks(netspec.LbIp, netspec.Link, portmap)
-	}
 
-	ips := oss.podsync.SecondIp(netspec.Link)
-	if ips != nil {
-		oss.logger.Info("add lb-member from links", "link", netspec.Link)
-		oss.addIps(newstat.Members, ips...)
-	}
-	// no members set , should return
-	if newstat.Members == nil {
-		oss.setReadyCondition(newstat, done, "")
-		return newstat, nil
+		ips := oss.podsync.SecondIp(netspec.LbIp)
+		if ips != nil {
+			oss.logger.Info("add members from link", "link", netspec.Link)
+			oss.addMembersByIps(newstat, ips...)
+		} else {
+			oss.logger.Info("not found ips from link", "link", netspec.Link)
+			return newstat, nil
+		}
 	}
 
 	for _, po := range netspec.Ports {
@@ -201,7 +225,7 @@ func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineSt
 			if mem.Ip == "" {
 				continue
 			}
-			// ip had get , should sync loadbalance
+			// ip had set, should sync loadbalance
 			po.Ips = append(po.Ips, mem.Ip)
 			syncnet = true
 		}
@@ -209,16 +233,14 @@ func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineSt
 	if syncnet == false {
 		return newstat, nil
 	}
+	errType = LbStep
 	tmpfpath, err = oss.generateTmpFile(oss.lbtpl, newspec)
 	if err != nil {
 		return newstat, err
 	}
-
-	oss.logger.Info("start sync network", "name", vm.GetName(), "namespace", vm.GetNamespace())
+	oss.logger.Info("start sync openstack loadbalance", "lb-name", netspec.Name)
 	done, err = oss.syncNet(tmpfpath, newspec, newstat)
-	oss.setReadyCondition(newstat, done, "")
 	if err != nil {
-		oss.setcondition(newstat, "network", err)
 		return newstat, err
 	}
 	return newstat, err
@@ -282,10 +304,10 @@ func (oss *OSService) setcondition(stat *vmv1.VirtualMachineStatus, typestr stri
 func (oss *OSService) setReadyCondition(stat *vmv1.VirtualMachineStatus, isready bool, reason string) {
 	var (
 		readyType = "Ready"
-		readystat = "false"
+		readystat = corev1.ConditionFalse
 	)
 	if isready {
-		readystat = "true"
+		readystat = corev1.ConditionTrue
 	}
 	for _, cond := range stat.Conditions {
 		if cond.Type == readyType {
@@ -322,7 +344,7 @@ func (oss *OSService) syncResourceStat(auth *vmv1.AuthSpec, stat *vmv1.ResourceS
 				})
 			}
 			if err != nil {
-				oss.logger.Error(err, "Creat stack failed", "stackname", stackname)
+				oss.logger.Info("Creat stack failed", "error", err, "stackname", stackname)
 				return nil, err
 			}
 		}
@@ -330,6 +352,7 @@ func (oss *OSService) syncResourceStat(auth *vmv1.AuthSpec, stat *vmv1.ResourceS
 			err = fmt.Errorf("Id can not fetch by stackname: %s", stackname)
 			return nil, err
 		}
+		oss.logger.Info("stack create success", "stackname", stackname)
 		stat.StackID = id
 		stat.HashId = newhash
 		updataTemp = true
@@ -338,13 +361,15 @@ func (oss *OSService) syncResourceStat(auth *vmv1.AuthSpec, stat *vmv1.ResourceS
 		if err != nil {
 			if _, ok := err.(gophercloud.ErrDefault409); !ok {
 				// stack exists
-				oss.logger.Error(err, "Update stack failed", "stackname", stackname)
+				oss.logger.Info("service update stack failed", "stackname", stackname, "error", err)
 				return nil, err
 			} else {
 				oss.logger.Info("stack is updating", "stackname", stackname)
 			}
 		}
+		oss.logger.Info("stack update success", "stackname", stackname, "oldid", stat.HashId, "newid", newhash)
 		updataTemp = true
+		stat.HashId = newhash
 	}
 	if updataTemp {
 		data, _ := ioutil.ReadFile(tmpfpath)

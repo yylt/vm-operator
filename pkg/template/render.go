@@ -21,29 +21,31 @@ var (
 )
 
 type Template struct {
-	tpls map[string]*template.Template
-
-	mu  sync.RWMutex
-	log logr.Logger
+	tpls  map[string]*template.Template
+	funcs template.FuncMap
+	mu    sync.RWMutex
+	log   logr.Logger
 }
 
 func NewTemplate(logger logr.Logger) *Template {
+	funcmap := sprig.TxtFuncMap()
+	funcmap["toChar"] = toChar
+	funcmap["intRange"] = intRange
+
 	return &Template{
-		tpls: make(map[string]*template.Template),
-		mu:   sync.RWMutex{},
-		log:  logger,
+		tpls:  make(map[string]*template.Template),
+		mu:    sync.RWMutex{},
+		log:   logger,
+		funcs: funcmap,
 	}
 }
 
 func (t *Template) update(name, filepath string) error {
-	funcmap := sprig.TxtFuncMap()
-	funcmap["toChar"] = toChar
-	funcmap["intRange"] = intRange
 	bs, err := ioutil.ReadFile(filepath)
 	if err != nil {
 		return err
 	}
-	t.tpls[name], err = template.New("").Funcs(funcmap).Parse(string(bs))
+	t.tpls[name], err = template.New("").Funcs(t.funcs).Parse(string(bs))
 	if err != nil {
 		return err
 	}
@@ -54,13 +56,13 @@ func (t *Template) AddTempFileMust(name string, filepath string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if _, ok := t.tpls[name]; ok {
-		t.log.Info("update", "name", name)
+		t.log.Info("render engine", "update name", name)
 	}
 	err := t.update(name, filepath)
 	if err != nil {
 		panic(err)
 	}
-	t.log.Info("add", "name", name, "filepath", filepath)
+	t.log.Info("render engine", "add name", name, "filepath", filepath)
 	return
 }
 
@@ -76,7 +78,7 @@ func (t *Template) RenderByName(name string, params interface{}) ([]byte, error)
 		return bs, err
 	}
 	err := fmt.Errorf("%s not found template", name)
-	t.log.Error(err, "reander tpl failed")
+	t.log.Error(err, "render tpl failed", "name", name)
 	return nil, err
 }
 

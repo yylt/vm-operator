@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -99,10 +100,10 @@ type VirtualMachineStatus struct {
 }
 
 type Condition struct {
-	LastUpdateTime string `json:"lastUpdateTime,omitempty"`
-	Type           string `json:"type,omitempty"` //should add Ready type for application
-	Reason         string `json:"reason,omitempty"`
-	Status         string `json:"status,omitempty"`
+	LastUpdateTime string                 `json:"lastUpdateTime,omitempty"`
+	Type           string                 `json:"type,omitempty"` //should add Ready type for application
+	Reason         string                 `json:"reason,omitempty"`
+	Status         corev1.ConditionStatus `json:"status,omitempty"`
 }
 
 type ServerStat struct {

@@ -154,11 +154,9 @@ func (a *Auth) ServerList(auth *vmv1.AuthSpec, opts *servers.ListOpts, fn func(r
 	return pages.EachPage(func(page pagination.Page) (bool, error) {
 		err = servers.ExtractServersInto(page, &rst)
 		if err != nil {
-			a.logger.Error(err, "server list result", "value", fmt.Sprintf("%v", rst))
 			return false, err
 		}
 		for _, li := range rst {
-			a.logger.Info("server info", "value", fmt.Sprintf("%v", li))
 			if fn(li) == false {
 				return false, nil
 			}
@@ -200,7 +198,6 @@ func (a *Auth) HeatList(auth *vmv1.AuthSpec, opts *stacks.ListOpts, fn func(rst 
 func (a *Auth) HeatGet(auth *vmv1.AuthSpec, name, id string) (*GetRst, error) {
 	client, err := a.heatClient(auth)
 	if err != nil {
-		a.logger.Info("get stack client failed")
 		return nil, err
 	}
 
@@ -210,6 +207,13 @@ func (a *Auth) HeatGet(auth *vmv1.AuthSpec, name, id string) (*GetRst, error) {
 		errtype := fmt.Sprintf("errType: %s", reflect.TypeOf(err).String())
 		a.logger.Info(errtype, "stack", "get")
 		return nil, err
+	}
+	if getresult.StatusReason != "" {
+		read := bytes.NewBuffer([]byte(getresult.StatusReason))
+		reason, err := read.ReadBytes('\n')
+		if err == nil {
+			getresult.StatusReason = string(reason)
+		}
 	}
 	result := &GetRst{
 		Id:     getresult.ID,

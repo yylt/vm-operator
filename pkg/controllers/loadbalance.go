@@ -2,9 +2,9 @@ package controllers
 
 import (
 	"bytes"
-	"io/ioutil"
-
 	"fmt"
+	"io/ioutil"
+	"sort"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
 )
@@ -12,17 +12,32 @@ import (
 func (oss *OSService) hashNetwork(spec *vmv1.LoadBalanceSpec) string {
 	buf := bufpool.Get().(*bytes.Buffer)
 	defer bufpool.Put(buf)
+	var (
+		proto, ips []string
+		port       []int
+	)
 	buf.Reset()
 	buf.WriteString(spec.Subnet.SubnetId)
 	buf.WriteString(spec.LbIp)
 	for _, portm := range spec.Ports {
 		for _, ip := range portm.Ips {
-			buf.WriteString(ip)
+			ips = append(ips, ip)
 		}
-		buf.WriteString(portm.Protocol)
-		buf.WriteString(fmt.Sprintf("%d", portm.Port))
+		proto = append(proto, portm.Protocol)
+		port = append(port, int(portm.Port))
 	}
-
+	sort.Strings(proto)
+	sort.Strings(ips)
+	sort.Ints(port)
+	for _, v := range proto {
+		buf.WriteString(v)
+	}
+	for _, v := range ips {
+		buf.WriteString(v)
+	}
+	for _, v := range port {
+		buf.WriteString(fmt.Sprintf("%d", v))
+	}
 	return fmt.Sprintf("%d", hashid(buf.Bytes()))
 }
 

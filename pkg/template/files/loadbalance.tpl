@@ -49,9 +49,5 @@ resources:
 
 
 outputs:
-{{ range $index, $v := $.loadbalance.port_map }}
-{{ range $ipindex, $ip := $v.ips }}
-  member{{ $ipindex }}:
-    value: {get_attr: [ lbmember{{ $ipindex }} ] }
-{{ end }}
-{{ end }}
+  lb:
+    value: {get_attr: [ lb ] }
