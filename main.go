@@ -41,7 +41,8 @@ var (
 	enableLeaderElection    bool
 	nettpl, vmtpl, tmpdir   string
 	podperiod, syncperiod   int64
-	level, identify         string
+	identify                string
+	level                   int
 )
 
 func init() {
@@ -52,29 +53,17 @@ func init() {
 
 }
 
-func setlevel(st string) uberzap.AtomicLevel {
-	var lvl zapcore.Level
-	switch st {
-	case "debug":
-		lvl = zapcore.DebugLevel
-	case "info":
-		lvl = zapcore.InfoLevel
-	case "warn":
-		lvl = zapcore.WarnLevel
-	case "error":
-		lvl = zapcore.ErrorLevel
-	default:
-		lvl = zapcore.InfoLevel
-	}
+func setlevel(st int) uberzap.AtomicLevel {
+	lvl := zapcore.Level(st)
 	return uberzap.NewAtomicLevelAt(lvl)
 }
 
 func main() {
-	flag.BoolVar(&enableLeaderElection, "enable-leader-election", true,
+	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flag.StringVar(&level, "level", "info", "log level, debug, info, warn, error")
-	flag.StringVar(&metricsAddr, "metrics-addr", "127.0.0.1:9448", "The address the metric endpoint binds to.")
+	flag.IntVar(&level, "V", 0, "log level, 0/1/2")
+	flag.StringVar(&metricsAddr, "metrics-addr", "127.0.0.1:9446", "The address the metric endpoint binds to.")
 	flag.StringVar(&healthAddr, "health-addr", "", "The address the health endpoint binds to.")
 	flag.StringVar(&nettpl, "net-tpl", "/opt/network.tpl", "net tpl file path")
 	flag.StringVar(&vmtpl, "vm-tpl", "/opt/vm.tpl", "vm tpl file path")
@@ -91,6 +80,9 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true), zap.Level(&lvl)))
 
 	sync := time.Duration(int64(time.Second) * syncperiod)
+
+	config := ctrl.GetConfigOrDie()
+
 	opt := ctrl.Options{
 		SyncPeriod:             &sync,
 		HealthProbeBindAddress: healthAddr,
@@ -100,7 +92,7 @@ func main() {
 		LeaderElection:         enableLeaderElection,
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), opt)
+	mgr, err := ctrl.NewManager(config, opt)
 	if err != nil {
 		setupLog.Error(err, "unable to create manager")
 		os.Exit(1)

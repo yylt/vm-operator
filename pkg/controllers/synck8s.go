@@ -3,7 +3,9 @@ package controllers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+
 	"net"
 	"strings"
 	"sync"
@@ -14,11 +16,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
 type info struct {
-	ips  map[string]struct{}
 	link string
 
 	portmap map[int32]string // should add
@@ -61,14 +63,17 @@ func (p *PodIp) hashinfo(val *info) uint64 {
 	buf.Reset()
 	defer bufpool.Put(buf)
 
-	for i, _ := range val.ips {
-		buf.WriteString(i)
+	if val.isdelete {
+		buf.WriteString("t")
+	} else {
+		buf.WriteString("f")
 	}
 
 	buf.WriteString(val.link)
 	for port, pt := range val.portmap {
 		buf.WriteString(fmt.Sprintf("%d", port))
 		buf.WriteString(pt)
+
 	}
 	return hashid(buf.Bytes())
 }
@@ -86,25 +91,19 @@ func (p *PodIp) sync(timed time.Duration) {
 					if val.hashid == hashid {
 						continue
 					}
+					p.logger.Info("start sync k8s service", "link", val.link)
 					if val.isdelete == true {
 						err = p.syncsvc(lbip, val)
 						if err != nil {
-							p.logger.Error(err, "delete service failed, but ignore!", "lbip", lbip)
+							p.logger.Error(err, "delete k8s service failed, but ignore!", "lbip", lbip)
 						}
 						delete(p.lbinfo, lbip)
 						continue
 					}
-
-					err = getPodSecondIps(p.logger, p.client, val.link, func(ip string) {
-						val.ips[ip] = struct{}{}
-					})
-					if err != nil {
-						p.logger.Error(err, "get ips failed", "link", val.link)
-					}
-
 					err = p.syncsvc(lbip, val)
 					if err != nil {
-						p.logger.Error(err, "sync service failed", "lbip", lbip)
+						p.logger.Error(err, "sync k8s service failed", "lbip", lbip)
+						continue
 					}
 					val.hashid = hashid
 				}
@@ -115,9 +114,7 @@ func (p *PodIp) sync(timed time.Duration) {
 }
 
 func (p *PodIp) syncsvc(lbip string, val *info) error {
-	if len(val.ips) == 0 {
-		return nil
-	}
+
 	var (
 		gvk = schema.GroupVersionResource{
 			Version:  "v1",
@@ -153,7 +150,9 @@ func (p *PodIp) syncsvc(lbip string, val *info) error {
 	} else {
 		//update
 		if _, ok := ns_map[res.namespace]; !ok {
-			_, err = p.client.Resource(gvk).Namespace(res.namespace).Update(svcunstruct, metav1.UpdateOptions{})
+			p.logger.Info("patch k8s service", "name", res.svcname, "ns", res.namespace, "value", svcunstruct.Object)
+			data, err := json.Marshal(svcunstruct.Object["spec"])
+			_, err = p.client.Resource(gvk).Namespace(res.namespace).Patch(res.svcname, types.MergePatchType, data, metav1.PatchOptions{})
 			if err != nil {
 				return err
 			}
@@ -176,12 +175,13 @@ func (p *PodIp) DelLinks(lbip string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if val, ok := p.lbinfo[lbip]; ok {
+		p.logger.Info("set delete on k8s service", "lbip", lbip, "link", val.link)
 		val.isdelete = true
 	}
 }
 
 func (p *PodIp) AddLinks(lbip string, link string, portmap map[int32]string) {
-	if link == "" || len(portmap) == 0 {
+	if link == "" {
 		return
 	}
 
@@ -197,7 +197,6 @@ func (p *PodIp) AddLinks(lbip string, link string, portmap map[int32]string) {
 		val.portmap = portmap
 	} else {
 		p.lbinfo[lbip] = &info{
-			ips:     make(map[string]struct{}),
 			portmap: portmap,
 			link:    link,
 		}
@@ -205,15 +204,21 @@ func (p *PodIp) AddLinks(lbip string, link string, portmap map[int32]string) {
 }
 
 func (p *PodIp) SecondIp(lbip string) []string {
-	var ips []string
+	var (
+		ips []string
+		err error
+	)
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	if v, ok := p.lbinfo[lbip]; ok {
-		for ip, _ := range v.ips {
+	if val, ok := p.lbinfo[lbip]; ok {
+		err = getPodSecondIps(p.logger, p.client, val.link, func(ip string) {
+			p.logger.Info("Get kuryr ip success", "link", val.link, "ip", ip)
 			ips = append(ips, ip)
+		})
+		if err != nil {
+			p.logger.Info("Get kuryr ip failed", "link", val.link, "error", err)
 		}
-
 	}
 	return ips
 }
@@ -258,7 +263,7 @@ func serviceExternalUnstract(labels map[string]string, namespace, name, lbip str
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "v1",
-			"kind":       "service",
+			"kind":       "Service",
 			"metadata": map[string]interface{}{
 				"name":      name,
 				"namespace": namespace,
@@ -277,11 +282,11 @@ func kuryrIps(object *unstructured.Unstructured, fn func(string)) error {
 
 	networks, found, err := unstructured.NestedString(object.Object, "metadata", "annotations", "k8s.v1.cni.cncf.io/networks-status")
 	if err != nil || !found {
-		return fmt.Errorf("not found networks-status in annotations")
+		return fmt.Errorf("Not found networks-status in annotations")
 	}
 	jsondata := gjson.Parse(networks)
 	if !jsondata.IsArray() {
-		return fmt.Errorf("the networks-status in annotations is not list")
+		return fmt.Errorf("Networks-status in annotations is not list")
 	}
 
 	jsondata.ForEach(func(_, value gjson.Result) bool {
@@ -332,7 +337,7 @@ func getLinkLabels(client dynamic.Interface, link string) (map[string]string, *r
 		maps, ok, err = unstructured.NestedMap(wk.Object, "spec", "selector", "matchLabels")
 	}
 	if err != nil || !ok {
-		err = fmt.Errorf("labels not found for resource %s/%s, error=%s", wk.GetNamespace(), wk.GetName(), err)
+		err = fmt.Errorf("Labels not found for resource %s/%s, error=%s", wk.GetNamespace(), wk.GetName(), err)
 		return nil, nil, err
 	}
 	var retmap = make(map[string]string)
@@ -378,12 +383,12 @@ func getPodSecondIps(logger logr.Logger, client dynamic.Interface, link string, 
 	}
 	results, err := client.Resource(gvk).Namespace(res.namespace).List(metav1.ListOptions{LabelSelector: buf.String()})
 	if err != nil {
-		return fmt.Errorf("list pods failed, label=%s, err=%s", buf.String(), err)
+		return fmt.Errorf("list pods failed, err=%s", err)
 	}
-	logger.Info("list pods on resource", "resource", link, "label", buf.String())
+	logger.Info("list pods on resource", "link", link, "label", buf.String())
 
 	for _, result := range results.Items {
-		logger.Info("try find kuryrip", "pod", result.GetSelfLink())
+		logger.Info("Try find kuryrip", "pod", result.GetSelfLink())
 		err = kuryrIps(&result, fn)
 		if err != nil {
 			return err

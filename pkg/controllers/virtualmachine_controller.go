@@ -18,8 +18,6 @@ package controllers
 
 import (
 	"context"
-	"time"
-
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
 	"github.com/go-logr/logr"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -28,10 +26,6 @@ import (
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	cli "sigs.k8s.io/controller-runtime/pkg/client"
-)
-
-var (
-	defaultTimeout = time.Second * 5
 )
 
 // VirtualMachineReconciler reconciles a VirtualMachine object
@@ -72,16 +66,16 @@ func (r *VirtualMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, err
 	if err != nil {
 		if apierrs.IsNotFound(err) {
 			// Delete event
-			r.logger.Info("object had deleted", "object", req.String(), "vm", vm)
+			r.logger.Info("object had deleted", "object", req.String())
 			return ctrl.Result{}, nil
 		}
-		r.logger.Error(err, "get object deleted")
+		r.logger.Error(err, "get object failed", "object", req.String())
 	}
 	if vm.DeletionTimestamp != nil {
 		r.logger.Info("object is deleting", "object", req.String())
 		stat = r.osService.Delete(&vm.Spec, vm.Status.DeepCopy())
 	} else {
-		r.logger.Info("start Reconcile", "object", req.String())
+		r.logger.Info("START Reconcile", "object", req.String())
 		switch vm.Spec.AssemblyPhase {
 		case vmv1.Creating:
 			fallthrough
@@ -90,9 +84,10 @@ func (r *VirtualMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, err
 		case vmv1.Deleting:
 			stat = r.osService.Delete(&vm.Spec, vm.Status.DeepCopy())
 		default:
+			r.logger.Info("Not found assemblyPhase", "object", req.String())
+			return ctrl.Result{}, nil
 		}
 	}
-	r.logger.Info("wait reconcile next", "object", req.String())
 	if stat == nil {
 		return ctrl.Result{}, err
 	}
@@ -111,12 +106,12 @@ func (r *VirtualMachineReconciler) doUpdateVmCrdStatus(nsname types.NamespacedNa
 		original.Status = *stat
 		if original.DeletionTimestamp != nil {
 			original.Finalizers = nil
-			r.logger.Info("delete finalizers")
+			r.logger.Info("delete finalizers", "object", nsname.String())
 			return r.Update(r.ctx, original)
 		} else {
 			if original.Finalizers == nil {
 				original.Finalizers = append(original.Finalizers, nsname.String())
-				r.logger.Info("set finalizers")
+				r.logger.Info("set finalizers", "object", nsname.String())
 			}
 			return r.Update(r.ctx, original)
 		}

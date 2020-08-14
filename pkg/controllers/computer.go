@@ -2,10 +2,9 @@ package controllers
 
 import (
 	"bytes"
-	"time"
-
 	"fmt"
 	"io/ioutil"
+	"time"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
@@ -18,12 +17,13 @@ func (oss *OSService) hashServer(spec *vmv1.ServerSpec) string {
 	buf.WriteString(spec.Subnet.SubnetId)
 	buf.WriteString(spec.Flavor)
 	buf.WriteString(spec.BootImage)
+	buf.WriteString(spec.BootVolumeId)
 	buf.WriteString(spec.UserData)
 
 	return fmt.Sprintf("%d", hashid(buf.Bytes()))
 }
 
-func (oss *OSService) syncServers(spec *vmv1.VirtualMachineSpec, stat *vmv1.VirtualMachineStatus) {
+func (oss *OSService) addMembersByServers(spec *vmv1.VirtualMachineSpec, stat *vmv1.VirtualMachineStatus) error {
 	var (
 		ids = make(map[string]int)
 		ip  string
@@ -33,9 +33,7 @@ func (oss *OSService) syncServers(spec *vmv1.VirtualMachineSpec, stat *vmv1.Virt
 	}
 	opt := servers.ListOpts{Name: spec.Server.Name}
 	err := oss.auth.ServerList(spec.Auth, &opt, func(rst *ServerRst) bool {
-		if rst.Name != spec.Server.Name {
-			return true
-		}
+		ip = ""
 		addrs, ok := rst.Addresses["private"]
 		if ok {
 			for _, val := range addrs {
@@ -45,6 +43,7 @@ func (oss *OSService) syncServers(spec *vmv1.VirtualMachineSpec, stat *vmv1.Virt
 				}
 			}
 		}
+		oss.logger.Info("server result", "name", spec.Server.Name, "value", fmt.Sprintf("%v", rst))
 		if v, ok := ids[rst.Id]; ok {
 			stat.Members[v].Ip = ip
 			stat.Members[v].Stat = rst.Stat
@@ -60,8 +59,9 @@ func (oss *OSService) syncServers(spec *vmv1.VirtualMachineSpec, stat *vmv1.Virt
 		return true
 	})
 	if err != nil {
-		oss.logger.Error(err, "list servers failed")
+		oss.logger.Info("list servers failed", "reason", err)
 	}
+	return err
 }
 
 // sync server
@@ -88,9 +88,10 @@ func (oss *OSService) syncComputer(tmpfpath string, spec *vmv1.VirtualMachineSpe
 
 	data, _ := ioutil.ReadFile(tmpfpath)
 	tempHash := fmt.Sprintf("%d", hashid(data))
+
 	result, err := oss.syncResourceStat(spec.Auth, stat.VmStatus, tmpfpath, tempHash)
 	if err != nil {
-		oss.logger.Error(err, "sync resource failed", "stackname", stackname)
+		oss.logger.Info("sync openstack stack failed", "error", err, "stackname", stackname)
 		novastat.Stat = Failed
 		return complate, err
 	}
