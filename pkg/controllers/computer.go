@@ -34,9 +34,8 @@ func (oss *OSService) addMembersByServers(spec *vmv1.VirtualMachineSpec, stat *v
 	opt := servers.ListOpts{Name: spec.Server.Name}
 	err := oss.auth.ServerList(spec.Auth, &opt, func(rst *ServerRst) bool {
 		ip = ""
-		addrs, ok := rst.Addresses["private"]
-		if ok {
-			for _, val := range addrs {
+		for _,addrs:=range rst.Addresses{
+			for _,val :=range addrs{
 				if val.Version == 4 {
 					ip = val.Address
 					break
