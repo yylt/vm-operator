@@ -27,6 +27,9 @@ const (
 	Creating AssemblyPhaseType = "Creating"
 	Updating AssemblyPhaseType = "Updating"
 	Deleting AssemblyPhaseType = "Deleting"
+	Stop     AssemblyPhaseType = "Stop"
+	Start    AssemblyPhaseType = "Start"
+	Recreate AssemblyPhaseType = "Recreate"
 )
 
 // VirtualMachineSpec defines the desired state of VirtualMachine

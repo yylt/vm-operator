@@ -143,6 +143,38 @@ func (oss *OSService) generateTmpFile(tpl string, spec *vmv1.VirtualMachineSpec)
 	return tmpfpath, err
 }
 
+func (oss *OSService) ServerRecocile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineStatus, error) {
+	var (
+		isstop bool = true
+		err    error
+	)
+	oss.logger.Info("server recocile", "phase", vm.Spec.AssemblyPhase)
+	if vm.Spec.AssemblyPhase != vmv1.Stop {
+		isstop = false
+	}
+	newspec := vm.Spec.DeepCopy()
+	newstat := vm.Status.DeepCopy()
+
+	if newspec.Server == nil {
+		oss.logger.Info("no server define")
+		return newstat, nil
+	}
+	if newstat.Members == nil {
+		oss.logger.Info("no member found")
+		return newstat, nil
+	}
+	for _, v := range vm.Status.Members {
+		if v.Stat == ServerRunStat && isstop {
+			err = oss.auth.ServerStop(vm.Spec.Auth, v.Id)
+		} else if v.Stat == ServerStopStat && !isstop {
+			err = oss.auth.ServerStart(vm.Spec.Auth, v.Id)
+		}
+		oss.logger.Info("operation member", "name", v.Name, "id", v.Id, "err", err)
+	}
+	err = oss.addMembersByServers(newspec, newstat)
+	return newstat, err
+}
+
 func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineStatus, error) {
 	var (
 		err             error
@@ -151,6 +183,7 @@ func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineSt
 		tmpfpath        string
 		reason, errType string
 	)
+
 	newspec := vm.Spec.DeepCopy()
 	newstat := vm.Status.DeepCopy()
 
@@ -166,10 +199,9 @@ func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineSt
 	}()
 	errType = CheckStep
 
-	err = oss.validOpenstack(newspec)
-	if err != nil {
-		oss.logger.Error(err, "spec is not valid!")
-		return nil, err
+	if newspec == nil {
+		oss.logger.Info("spec is not define")
+		return nil, nil
 	}
 	if newspec.Server == nil && netspec == nil {
 		err = fmt.Errorf("Not found server and loadbalance spec")
@@ -231,8 +263,10 @@ func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineSt
 		}
 	}
 	if syncnet == false {
+		oss.logger.Info("Not found ip or ports in loadbalance")
 		return newstat, nil
 	}
+
 	errType = LbStep
 	tmpfpath, err = oss.generateTmpFile(oss.lbtpl, newspec)
 	if err != nil {

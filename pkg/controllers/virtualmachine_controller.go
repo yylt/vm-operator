@@ -75,8 +75,18 @@ func (r *VirtualMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, err
 		r.logger.Info("object is deleting", "object", req.String())
 		stat = r.osService.Delete(&vm.Spec, vm.Status.DeepCopy())
 	} else {
+		if vm.Spec.Auth == nil {
+			r.logger.Info("Not define auth info in spec", "object", req.String())
+			return ctrl.Result{}, err
+		}
 		r.logger.Info("START Reconcile", "object", req.String())
 		switch vm.Spec.AssemblyPhase {
+		case vmv1.Recreate:
+			fallthrough
+		case vmv1.Start:
+			fallthrough
+		case vmv1.Stop:
+			stat, err = r.osService.ServerRecocile(&vm)
 		case vmv1.Creating:
 			fallthrough
 		case vmv1.Updating:

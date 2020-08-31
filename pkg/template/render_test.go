@@ -24,7 +24,6 @@ func init() {
 func TestAddTempFileMust(t *testing.T) {
 	engine.AddTempFileMust("net", "./files/loadbalance.tpl")
 	engine.AddTempFileMust("vm", "./files/vm.tpl")
-	engine.AddTempFileMust("vmg", "./files/vm_group.yaml.tpl")
 }
 
 func TestRenderByName(t *testing.T) {

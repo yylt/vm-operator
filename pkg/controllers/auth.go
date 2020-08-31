@@ -15,9 +15,15 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/startstop"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks"
 	"github.com/gophercloud/gophercloud/pagination"
+)
+
+const (
+	ServerRunStat  = "ACTIVE"
+	ServerStopStat = "SHUTOFF"
 )
 
 var (
@@ -58,6 +64,13 @@ type Auth struct {
 	endpoint string
 	clients  map[uint64]*gophercloud.ProviderClient
 	mu       sync.RWMutex
+}
+
+func wrapErr(err error) error {
+	if _, ok := err.(*gophercloud.ErrDefault409); ok {
+		return nil
+	}
+	return err
 }
 
 func (a *Auth) authByToken(id, token string) (*gophercloud.ProviderClient, error) {
@@ -113,18 +126,6 @@ func (a *Auth) authByCredential(id, name, secret string) (*gophercloud.ProviderC
 	return cli, nil
 }
 
-//TODO parse error type
-func (a *Auth) parseErr(err error) error {
-	if err == nil {
-		return nil
-	}
-	a.logger.Info(fmt.Sprintf("err type: %s", reflect.TypeOf(err).String()))
-	//if _, ok := err.(gophercloud.ErrDefault409); ok {
-	//	return ErrExist
-	//}
-	return nil
-}
-
 func (a *Auth) ServerGet(auth *vmv1.AuthSpec, id string) (*ServerRst, error) {
 	client, err := a.serverClient(auth)
 	if err != nil {
@@ -134,9 +135,27 @@ func (a *Auth) ServerGet(auth *vmv1.AuthSpec, id string) (*ServerRst, error) {
 	result := servers.Get(client, id)
 	err = result.ExtractInto(&rst)
 	if err != nil {
-		return nil, err
+		return nil, wrapErr(err)
 	}
 	return rst, nil
+}
+
+func (a *Auth) ServerStop(auth *vmv1.AuthSpec, id string) error {
+	client, err := a.serverClient(auth)
+	if err != nil {
+		return err
+	}
+	err = startstop.Stop(client, id).ExtractErr()
+	return wrapErr(err)
+}
+
+func (a *Auth) ServerStart(auth *vmv1.AuthSpec, id string) error {
+	client, err := a.serverClient(auth)
+	if err != nil {
+		return err
+	}
+	err = startstop.Start(client, id).ExtractErr()
+	return wrapErr(err)
 }
 
 func (a *Auth) ServerList(auth *vmv1.AuthSpec, opts *servers.ListOpts, fn func(rst *ServerRst) bool) error {

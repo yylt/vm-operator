@@ -41,7 +41,7 @@ var (
 	enableLeaderElection    bool
 	nettpl, vmtpl, tmpdir   string
 	podperiod, syncperiod   int64
-	identify                string
+	identify, leaderId      string
 	level                   int
 )
 
@@ -72,6 +72,7 @@ func main() {
 
 	flag.Int64Var(&syncperiod, "sync-period", 120, "sync time duration second")
 	flag.Int64Var(&podperiod, "pod-period", 60, "sync time duration second")
+	flag.StringVar(&leaderId, "leaderId", "vm.controller", "sync time duration second")
 	flag.Parse()
 
 	rand.Seed(time.Now().UnixNano())
@@ -82,6 +83,7 @@ func main() {
 	sync := time.Duration(int64(time.Second) * syncperiod)
 
 	config := ctrl.GetConfigOrDie()
+	leaderDu := time.Second * 60
 
 	opt := ctrl.Options{
 		SyncPeriod:             &sync,
@@ -90,6 +92,8 @@ func main() {
 		MetricsBindAddress:     metricsAddr,
 		Port:                   9446,
 		LeaderElection:         enableLeaderElection,
+		LeaderElectionID:       leaderId,
+		LeaseDuration:          &leaderDu,
 	}
 
 	mgr, err := ctrl.NewManager(config, opt)
