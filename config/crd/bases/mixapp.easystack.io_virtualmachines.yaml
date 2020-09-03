@@ -171,6 +171,16 @@ spec:
         status:
           description: VirtualMachineStatus defines the observed state of VirtualMachine
           properties:
+            authStat:
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+              required:
+              - id
+              - name
+              type: object
             conditions:
               items:
                 properties:

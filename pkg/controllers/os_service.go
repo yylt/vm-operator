@@ -182,8 +182,8 @@ func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineSt
 		syncnet         bool
 		tmpfpath        string
 		reason, errType string
+		cred            *CredentialsRst
 	)
-
 	newspec := vm.Spec.DeepCopy()
 	newstat := vm.Status.DeepCopy()
 
@@ -199,10 +199,19 @@ func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineSt
 	}()
 	errType = CheckStep
 
-	if newspec == nil {
-		oss.logger.Info("spec is not define")
-		return nil, nil
+	cred, err = oss.auth.AppCredentialsGet(newspec.Auth)
+	if err == nil {
+		newstat.AuthStat = &vmv1.AuthStat{
+			CredName: cred.Name,
+			CredId:   cred.Id,
+		}
 	}
+
+	if newstat.AuthStat != nil {
+		newspec.Auth.CredentialID = newstat.AuthStat.CredId
+		newspec.Auth.CredentialName = newstat.AuthStat.CredName
+	}
+
 	if newspec.Server == nil && netspec == nil {
 		err = fmt.Errorf("Not found server and loadbalance spec")
 		return newstat, err

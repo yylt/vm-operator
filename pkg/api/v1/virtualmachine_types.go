@@ -100,6 +100,12 @@ type VirtualMachineStatus struct {
 	NetStatus  *ResourceStatus `json:"netStatus,omitempty"`
 	Members    []*ServerStat   `json:"members,omitempty"`
 	Conditions []*Condition    `json:"conditions,omitempty"`
+	AuthStat   *AuthStat       `json:"authStat,omitempty"`
+}
+
+type AuthStat struct {
+	CredName string `json:"name"`
+	CredId   string `json:"id"`
 }
 
 type Condition struct {

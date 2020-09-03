@@ -95,17 +95,18 @@ func (p *PodIp) sync(timed time.Duration) {
 					if val.isdelete == true {
 						err = p.syncsvc(lbip, val)
 						if err != nil {
-							p.logger.Error(err, "delete k8s service failed, but ignore!", "lbip", lbip)
+							p.logger.Info("delete k8s svc failed, but ignore!", "err", err)
 						}
 						delete(p.lbinfo, lbip)
 						continue
 					}
 					err = p.syncsvc(lbip, val)
 					if err != nil {
-						p.logger.Error(err, "sync k8s service failed", "lbip", lbip)
+						p.logger.Info("patch/create k8s svc failed", "err", err)
 						continue
 					}
 					val.hashid = hashid
+					p.logger.Info("sync k8s service successs", "lbip", lbip, "link", val.link)
 				}
 				p.mu.RUnlock()
 			}
@@ -126,14 +127,12 @@ func (p *PodIp) syncsvc(lbip string, val *info) error {
 
 	labels, res, err := getLinkLabels(p.client, link)
 	if err != nil {
-		p.logger.Info("get link label failed", "lbip", lbip, "error", err)
 		return err
 	}
 
 	if val.isdelete == true {
 		err = p.client.Resource(gvk).Namespace(res.namespace).Delete(res.svcname, &metav1.DeleteOptions{})
 		if err != nil {
-			p.logger.Info("delete svc failed", "name", lbip, "error", err)
 			return err
 		}
 	}

@@ -17,6 +17,8 @@ import (
 	"github.com/gophercloud/gophercloud/openstack"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/startstop"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
+	appcred "github.com/gophercloud/gophercloud/openstack/identity/v3/applicationcredentials"
+	"github.com/gophercloud/gophercloud/openstack/identity/v3/tokens"
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks"
 	"github.com/gophercloud/gophercloud/pagination"
 )
@@ -50,6 +52,12 @@ type ServerRst struct {
 	CreateTime time.Time `json:"created"`
 
 	Addresses map[string][]servers.Address `json:"addresses"`
+}
+
+type CredentialsRst struct {
+	Secret string `json:"secret"`
+	Name   string `json:"name"`
+	Id     string `json:"id"`
 }
 
 type GetRst struct {
@@ -102,7 +110,6 @@ func (a *Auth) authByCredential(id, name, secret string) (*gophercloud.ProviderC
 	defer bufpool.Put(buf)
 	buf.Reset()
 	buf.WriteString(id)
-	buf.WriteString(name)
 	hashid := hashid(buf.Bytes())
 
 	a.mu.Lock()
@@ -124,6 +131,45 @@ func (a *Auth) authByCredential(id, name, secret string) (*gophercloud.ProviderC
 	}
 	a.clients[hashid] = cli
 	return cli, nil
+}
+
+func (a *Auth) AppCredentialsGet(auth *vmv1.AuthSpec) (*CredentialsRst, error) {
+	client, err := a.identityClient(auth)
+	if err != nil {
+		return nil, err
+	}
+	tokeninfo := tokens.Get(client, auth.Token)
+	user, err := tokeninfo.ExtractUser()
+	if err != nil {
+		return nil, err
+	}
+	username := auth.ProjectID[:10]
+	var s struct {
+		Credresult *CredentialsRst `json:"application_credential"`
+	}
+	pages := appcred.List(client, user.ID, appcred.ListOpts{Name: username})
+	pages.EachPage(func(page pagination.Page) (b bool, err error) {
+		apps, err := appcred.ExtractApplicationCredentials(page)
+		if err != nil {
+			a.logger.Info("extract app credential page failed", "err", err)
+			return true, nil
+		}
+		for _, v := range apps {
+			if v.Name == username {
+				s.Credresult = &CredentialsRst{
+					Name: v.Name,
+					Id:   v.ID,
+				}
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+	if s.Credresult != nil {
+		return s.Credresult, nil
+	}
+	err = appcred.Create(client, user.ID, appcred.CreateOpts{Name: username, Secret: username}).ExtractInto(&s)
+	return s.Credresult, err
 }
 
 func (a *Auth) ServerGet(auth *vmv1.AuthSpec, id string) (*ServerRst, error) {
@@ -300,15 +346,33 @@ func (a *Auth) serverClient(auth *vmv1.AuthSpec) (*gophercloud.ServiceClient, er
 	return openstack.NewComputeV2(provider, gophercloud.EndpointOpts{})
 }
 
+func (a *Auth) identityClient(auth *vmv1.AuthSpec) (*gophercloud.ServiceClient, error) {
+	provider, err := a.providerClient(auth)
+	if err != nil {
+		return nil, err
+	}
+	return openstack.NewIdentityV3(provider, gophercloud.EndpointOpts{})
+}
+
 // Get client
 func (a *Auth) providerClient(auth *vmv1.AuthSpec) (*gophercloud.ProviderClient, error) {
+	var (
+		provcli *gophercloud.ProviderClient
+		err     error
+	)
+	if auth.CredentialID != "" && auth.CredentialName != "" {
+		provcli, err = a.authByCredential(auth.CredentialID, auth.CredentialName, auth.CredentialName)
+		if err == nil {
+			return provcli, err
+		}
+	}
 	if auth.ProjectID != "" && auth.Token != "" {
-		return a.authByToken(auth.ProjectID, auth.Token)
+		provcli, err = a.authByToken(auth.ProjectID, auth.Token)
+		if err == nil {
+			return provcli, err
+		}
 	}
-	if auth.CredentialID != "" && auth.CredentialName != "" && auth.CredentialSecret != "" {
-		return a.authByCredential(auth.CredentialID, auth.CredentialName, auth.CredentialSecret)
-	}
-	return nil, fmt.Errorf("No token or credential define!")
+	return nil, fmt.Errorf("Authentication failed")
 }
 
 func NewAuth(auth_url string, logger logr.Logger) *Auth {
