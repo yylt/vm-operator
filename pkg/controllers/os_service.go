@@ -99,7 +99,7 @@ func (oss *OSService) validOpenstack(spec *vmv1.VirtualMachineSpec) error {
 	return nil
 }
 
-func (oss *OSService) addMembersByIps(netstat *vmv1.VirtualMachineStatus, ips ...string) {
+func (oss *OSService) addMembersByIps(netstat *vmv1.VirtualMachineStatus, ips ...*Result) {
 	if len(ips) == 0 {
 		return
 	}
@@ -108,11 +108,9 @@ func (oss *OSService) addMembersByIps(netstat *vmv1.VirtualMachineStatus, ips ..
 		ipmap[member.Ip] = struct{}{}
 	}
 	for _, ip := range ips {
-		if _, ok := ipmap[ip]; ok {
-			continue
-		}
 		netstat.Members = append(netstat.Members, &vmv1.ServerStat{
-			Ip: ip,
+			Ip: ip.Ip,
+			Id: ip.PodName,
 		})
 	}
 }

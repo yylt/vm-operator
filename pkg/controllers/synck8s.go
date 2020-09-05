@@ -20,12 +20,16 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-type info struct {
-	link string
+type Result struct {
+	Ip      string
+	PodName string
+}
 
+type info struct {
 	portmap map[int32]string // should add
 
 	hashid   uint64
+	link     string
 	isdelete bool
 }
 
@@ -202,18 +206,19 @@ func (p *PodIp) AddLinks(lbip string, link string, portmap map[int32]string) {
 	}
 }
 
-func (p *PodIp) SecondIp(lbip string) []string {
+func (p *PodIp) SecondIp(lbip string) []*Result {
 	var (
-		ips []string
+		ips []*Result
 		err error
 	)
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
 	if val, ok := p.lbinfo[lbip]; ok {
-		err = getPodSecondIps(p.logger, p.client, val.link, func(ip string) {
+		err = getPodSecondIps(p.logger, p.client, val.link, func(podname, ip string) {
 			p.logger.Info("Get kuryr ip success", "link", val.link, "ip", ip)
-			ips = append(ips, ip)
+			ips = append(ips, &Result{Ip: ip,
+				PodName: podname})
 		})
 		if err != nil {
 			p.logger.Info("Get kuryr ip failed", "link", val.link, "error", err)
@@ -277,7 +282,7 @@ func serviceExternalUnstract(labels map[string]string, namespace, name, lbip str
 
 }
 
-func kuryrIps(object *unstructured.Unstructured, fn func(string)) error {
+func kuryrIps(object *unstructured.Unstructured, fn func(string, string)) error {
 
 	networks, found, err := unstructured.NestedString(object.Object, "metadata", "annotations", "k8s.v1.cni.cncf.io/networks-status")
 	if err != nil || !found {
@@ -299,8 +304,7 @@ func kuryrIps(object *unstructured.Unstructured, fn func(string)) error {
 			for _, ip := range ips.Array() {
 				tmpip := net.ParseIP(ip.String())
 				if tmpip != nil {
-					fn(tmpip.String())
-
+					fn(object.GetName(), tmpip.String())
 				}
 			}
 		}
@@ -351,7 +355,7 @@ func getLinkLabels(client dynamic.Interface, link string) (map[string]string, *r
 	return retmap, res, nil
 }
 
-func getPodSecondIps(logger logr.Logger, client dynamic.Interface, link string, fn func(string)) error {
+func getPodSecondIps(logger logr.Logger, client dynamic.Interface, link string, fn func(string, string)) error {
 	var (
 		err error
 	)
