@@ -108,6 +108,10 @@ func (oss *OSService) addMembersByIps(netstat *vmv1.VirtualMachineStatus, ips ..
 		ipmap[member.Ip] = struct{}{}
 	}
 	for _, ip := range ips {
+		if _, ok := ipmap[ip.Ip]; ok {
+			continue
+		}
+		ipmap[ip.Ip] = struct{}{}
 		netstat.Members = append(netstat.Members, &vmv1.ServerStat{
 			Ip: ip.Ip,
 			Id: ip.PodName,

@@ -360,14 +360,14 @@ func (a *Auth) providerClient(auth *vmv1.AuthSpec) (*gophercloud.ProviderClient,
 		provcli *gophercloud.ProviderClient
 		err     error
 	)
-	if auth.CredentialID != "" && auth.CredentialName != "" {
-		provcli, err = a.authByCredential(auth.CredentialID, auth.CredentialName, auth.CredentialName)
+	if auth.ProjectID != "" && auth.Token != "" {
+		provcli, err = a.authByToken(auth.ProjectID, auth.Token)
 		if err == nil {
 			return provcli, err
 		}
 	}
-	if auth.ProjectID != "" && auth.Token != "" {
-		provcli, err = a.authByToken(auth.ProjectID, auth.Token)
+	if auth.CredentialID != "" && auth.CredentialName != "" {
+		provcli, err = a.authByCredential(auth.CredentialID, auth.CredentialName, auth.CredentialName)
 		if err == nil {
 			return provcli, err
 		}
