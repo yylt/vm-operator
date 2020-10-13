@@ -71,7 +71,7 @@ func main() {
 	flag.StringVar(&tmpdir, "tmp-dir", "/tmp", "tmp dir ,should can write ")
 	flag.StringVar(&identify, "identify-addr", "http://keystone-api.openstack.svc.cluster.local/v3", "identify address.")
 
-	flag.Int64Var(&syncperiod, "sync-period", 120, "sync time duration second")
+	flag.Int64Var(&syncperiod, "sync-period", 100, "sync time duration second")
 	flag.Int64Var(&podperiod, "pod-period", 60, "sync time duration second")
 	flag.StringVar(&leaderId, "leaderId", "vm.controller", "sync time duration second")
 	flag.Parse()
@@ -82,9 +82,9 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true), zap.Level(&lvl)))
 
 	sync := time.Duration(int64(time.Second) * syncperiod)
+	worksync := time.Duration(int64(time.Second) * syncperiod / 2)
 
 	config := ctrl.GetConfigOrDie()
-	leaderDu := time.Second * 60
 
 	opt := ctrl.Options{
 		SyncPeriod:             &sync,
@@ -94,7 +94,6 @@ func main() {
 		Port:                   9446,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       leaderId,
-		LeaseDuration:          &leaderDu,
 	}
 
 	mgr, err := ctrl.NewManager(config, opt)
@@ -110,7 +109,8 @@ func main() {
 	}
 
 	synck8s := controllers.NewPodIp(time.Duration(int64(time.Second)*podperiod), ctrl.Log, client)
-	oss := controllers.NewOSService(nettpl, vmtpl, tmpdir, identify, synck8s, ctrl.Log)
+	wm := controllers.NewWorkers(worksync, ctrl.Log)
+	oss := controllers.NewOSService(nettpl, vmtpl, tmpdir, identify, wm, synck8s, ctrl.Log)
 
 	vm := controllers.NewVirtualMachine(mgr.GetClient(), mgr.GetAPIReader(), ctrl.Log, oss)
 	if err = vm.SetupWithManager(mgr); err != nil {

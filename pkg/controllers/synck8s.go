@@ -216,7 +216,7 @@ func (p *PodIp) SecondIp(lbip string) []*Result {
 
 	if val, ok := p.lbinfo[lbip]; ok {
 		err = getPodSecondIps(p.logger, p.client, val.link, func(podname, ip string) {
-			p.logger.Info("Get kuryr ip success", "link", val.link, "ip", ip)
+			p.logger.Info("Get kuryr ip success", "ip", ip)
 			ips = append(ips, &Result{Ip: ip,
 				PodName: podname})
 		})
@@ -388,7 +388,7 @@ func getPodSecondIps(logger logr.Logger, client dynamic.Interface, link string, 
 	if err != nil {
 		return fmt.Errorf("list pods failed, err=%s", err)
 	}
-	logger.Info("list pods on resource", "link", link, "label", buf.String())
+	//logger.Info("list pods on resource", "link", link, "label", buf.String())
 
 	for _, result := range results.Items {
 		logger.Info("Try find kuryrip", "pod", result.GetSelfLink())

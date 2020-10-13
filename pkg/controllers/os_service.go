@@ -47,6 +47,8 @@ const (
 	heatTimeout = 10
 	tmpPattern  = "tmp-*.txt"
 
+	StackTag = "ecns-mixapp"
+
 	Succeeded = "Succeeded"
 	Failed    = "Failed"
 
@@ -55,29 +57,42 @@ const (
 	LbStep     = "Loadbalance"
 )
 
-type OSService struct {
-	auth *Auth
+type SuccessErr struct {
+	msg string
+}
 
-	podsync      *PodIp
-	engine       *template.Template
+func (se *SuccessErr) Error() string {
+	return se.msg
+}
+func NewSuccessErr(s string) *SuccessErr {
+	return &SuccessErr{
+		msg: s,
+	}
+}
+
+type OSService struct {
+	auth    *Auth
+	WokerM  *WorkManager
+	podsync *PodIp
+	engine  *template.Template
+
 	tmpDir       string //need rw mode
-	stackTag     string
 	lbtpl, vmtpl string
 
 	logger logr.Logger
 }
 
-func NewOSService(lbtplpath, vmtplpath, tmpdir string, identify string, podsync *PodIp, logger logr.Logger) *OSService {
+func NewOSService(lbtplpath, vmtplpath, tmpdir string, identify string, wm *WorkManager, podsync *PodIp, logger logr.Logger) *OSService {
 	// get ECS cloud admin credential info from env
 
 	oss := &OSService{
-		auth:     NewAuth(identify, logger),
-		logger:   logger,
-		tmpDir:   tmpdir,
-		lbtpl:    "net",
-		vmtpl:    "vm",
-		stackTag: "ecns-mixapp",
-		podsync:  podsync,
+		auth:    NewAuth(identify, logger),
+		logger:  logger,
+		tmpDir:  tmpdir,
+		lbtpl:   "net",
+		vmtpl:   "vm",
+		WokerM:  wm,
+		podsync: podsync,
 	}
 
 	tmpl := template.NewTemplate(oss.logger)
@@ -88,15 +103,8 @@ func NewOSService(lbtplpath, vmtplpath, tmpdir string, identify string, podsync 
 		tmpl.AddTempFileMust(k, v)
 	}
 	oss.engine = tmpl
+	wm.Run()
 	return oss
-}
-
-func (oss *OSService) validOpenstack(spec *vmv1.VirtualMachineSpec) error {
-	if &spec == nil {
-		return fmt.Errorf("spec not define")
-	}
-
-	return nil
 }
 
 func (oss *OSService) addMembersByIps(netstat *vmv1.VirtualMachineStatus, ips ...*Result) {
@@ -145,46 +153,39 @@ func (oss *OSService) generateTmpFile(tpl string, spec *vmv1.VirtualMachineSpec)
 	return tmpfpath, err
 }
 
-func (oss *OSService) ServerRecocile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineStatus, error) {
+func (oss *OSService) ServerRecocile(vm *vmv1.VirtualMachine) {
 	var (
 		isstop bool = true
 		err    error
 	)
-	oss.logger.Info("server recocile", "phase", vm.Spec.AssemblyPhase)
+	if vm.Spec.Server == nil || vm.Status.Members == nil {
+		return
+	}
+
+	oss.logger.Info("Recocile member", "phase", vm.Spec.AssemblyPhase)
 	if vm.Spec.AssemblyPhase != vmv1.Stop {
 		isstop = false
 	}
-	newspec := vm.Spec.DeepCopy()
-	newstat := vm.Status.DeepCopy()
 
-	if newspec.Server == nil {
-		oss.logger.Info("no server define")
-		return newstat, nil
-	}
-	if newstat.Members == nil {
-		oss.logger.Info("no member found")
-		return newstat, nil
-	}
 	for _, v := range vm.Status.Members {
 		if v.Stat == ServerRunStat && isstop {
 			err = oss.auth.ServerStop(vm.Spec.Auth, v.Id)
+			oss.logger.Info("Recocile member failed", "id", v.Id, "err", err)
 		} else if v.Stat == ServerStopStat && !isstop {
 			err = oss.auth.ServerStart(vm.Spec.Auth, v.Id)
+			oss.logger.Info("Recocile member failed", "id", v.Id, "err", err)
 		}
-		oss.logger.Info("operation member", "name", v.Name, "id", v.Id, "err", err)
 	}
-	err = oss.addMembersByServers(newspec, newstat)
-	return newstat, err
+	return
 }
 
+// All
 func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineStatus, error) {
 	var (
-		err             error
-		done            bool
-		syncnet         bool
-		tmpfpath        string
-		reason, errType string
-		cred            *CredentialsRst
+		err      error
+		findIps  bool
+		tmpfpath string
+		errType  string
 	)
 	newspec := vm.Spec.DeepCopy()
 	newstat := vm.Status.DeepCopy()
@@ -192,58 +193,39 @@ func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineSt
 	netspec := newspec.LoadBalance
 	defer func() {
 		oss.setcondition(newstat, errType, err)
-		if err == nil {
-			reason = errType
-		} else {
-			reason = err.Error()
-		}
-		oss.setReadyCondition(newstat, done, reason)
 	}()
 	errType = CheckStep
-
-	cred, err = oss.auth.AppCredentialsGet(newspec.Auth)
-	if err == nil {
-		newstat.AuthStat = &vmv1.AuthStat{
-			CredName: cred.Name,
-			CredId:   cred.Id,
-		}
-	}
-
-	if newstat.AuthStat != nil {
-		newspec.Auth.CredentialID = newstat.AuthStat.CredId
-		newspec.Auth.CredentialName = newstat.AuthStat.CredName
-	}
-
 	if newspec.Server == nil && netspec == nil {
 		err = fmt.Errorf("Not found server and loadbalance spec")
 		return newstat, err
 	}
-	tmpfpath, err = oss.generateTmpFile(oss.vmtpl, newspec)
-	if err != nil {
-		oss.logger.Error(err, "generate computer template failed")
-		return nil, err
-	}
 	errType = ServerStep
 	if newspec.Server != nil {
-		if newspec.Server.BootImage == "" && newspec.Server.BootVolumeId == "" {
-			err = fmt.Errorf("boot image and boot volume should not null both!")
+		tmpfpath, err = oss.generateTmpFile(oss.vmtpl, newspec)
+		if err != nil {
+			oss.logger.Error(err, "generate computer template failed")
 			return newstat, err
 		}
-		oss.logger.Info("start sync openstack server", "server-name", newspec.Server.Name)
-		done, err = oss.syncComputer(tmpfpath, newspec, newstat)
-		oss.setcondition(newstat, errType, err)
-		if netspec == nil || netspec.Link == "" {
-			oss.logger.Info("add members from openstack server", "server-name", newspec.Server.Name)
-			err = oss.addMembersByServers(newspec, newstat)
-			if err != nil {
+		if newspec.Server.BootImage == "" && newspec.Server.BootVolumeId == "" {
+			err = fmt.Errorf("Boot image or boot volume must not nil both!")
+			return newstat, err
+		}
+		oss.logger.Info("Sync spec server", "server", newspec.Server.Name)
+		err = oss.syncComputer(tmpfpath, newspec, newstat)
+		if err != nil {
+			if _, ok := err.(*SuccessErr); !ok {
+				oss.logger.Info("Sync spec server failed", "err", err)
 				return newstat, err
 			}
 		}
 	}
 
-	if netspec == nil {
-		return newstat, nil
+	errType = LbStep
+	if netspec == nil || len(netspec.Ports) == 0 {
+		err = fmt.Errorf("Lb spec or lb ports is nil")
+		return newstat, err
 	}
+	// fetch ips from pod, now link is deploy selfLink url
 	if netspec.Link != "" {
 		if !oss.podsync.LbExist(netspec.LbIp) {
 			portmap := make(map[int32]string)
@@ -252,17 +234,12 @@ func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineSt
 			}
 			oss.podsync.AddLinks(netspec.LbIp, netspec.Link, portmap)
 		}
-
 		ips := oss.podsync.SecondIp(netspec.LbIp)
 		if ips != nil {
-			oss.logger.Info("add members from link", "link", netspec.Link)
+			oss.logger.Info("Add members from link", "link", netspec.Link)
 			oss.addMembersByIps(newstat, ips...)
-		} else {
-			oss.logger.Info("not found ips from link", "link", netspec.Link)
-			return newstat, nil
 		}
 	}
-
 	for _, po := range netspec.Ports {
 		for _, mem := range newstat.Members {
 			if mem.Ip == "" {
@@ -270,23 +247,25 @@ func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineSt
 			}
 			// ip had set, should sync loadbalance
 			po.Ips = append(po.Ips, mem.Ip)
-			syncnet = true
+			findIps = true
 		}
 	}
-	if syncnet == false {
-		oss.logger.Info("Not found ip or ports in loadbalance")
-		return newstat, nil
+	if findIps == false {
+		err = fmt.Errorf("Not found ip from server or pod, stop sync loadbalance")
+		return newstat, err
 	}
-
-	errType = LbStep
 	tmpfpath, err = oss.generateTmpFile(oss.lbtpl, newspec)
 	if err != nil {
 		return newstat, err
 	}
-	oss.logger.Info("start sync openstack loadbalance", "lb-name", netspec.Name)
-	done, err = oss.syncNet(tmpfpath, newspec, newstat)
+	oss.logger.Info("Sync spec loadbalance", "lb", netspec.Name)
+	err = oss.syncNet(tmpfpath, newspec, newstat)
 	if err != nil {
-		return newstat, err
+		if _, ok := err.(*SuccessErr); !ok {
+			oss.logger.Info("Sync spec loadbalance failed", "err", err)
+			return newstat, err
+		}
+		err = nil
 	}
 	return newstat, err
 }
@@ -302,12 +281,14 @@ func (oss *OSService) Delete(spec *vmv1.VirtualMachineSpec, stat *vmv1.VirtualMa
 	netstat := stat.NetStatus
 	if vmstat != nil {
 		vmstat.Stat = string(vmv1.Deleting)
-		if vmstat.StackID != "" && vmstat.StackName != "" {
-			oss.logger.Info("delete server", "id", vmstat.StackID, "name", vmstat.StackName)
-			err = oss.auth.HeatDelete(spec.Auth, vmstat.StackName, vmstat.StackID)
+		if vmstat.StackID != "" {
+			err = oss.WokerM.DelItem(vmstat.StackID)
 			if err != nil {
-				oss.logger.Error(err, "delete server stack failed", "stackname", vmstat.StackName)
+				vmstat.Template = err.Error()
+			} else {
+				vmstat.Template = ""
 			}
+
 		}
 	}
 
@@ -316,14 +297,16 @@ func (oss *OSService) Delete(spec *vmv1.VirtualMachineSpec, stat *vmv1.VirtualMa
 		if spec.LoadBalance != nil && spec.LoadBalance.Link != "" {
 			oss.podsync.DelLinks(spec.LoadBalance.LbIp)
 		}
-		if netstat.StackID != "" && netstat.StackName != "" {
-			oss.logger.Info("delete network", "id", netstat.StackID, "name", netstat.StackName)
-			err = oss.auth.HeatDelete(spec.Auth, netstat.StackName, netstat.StackID)
+		if netstat.StackID != "" {
+			err = oss.WokerM.DelItem(netstat.StackID)
 			if err != nil {
-				oss.logger.Error(err, "delete net stack failed", "stackname", netstat.StackName)
+				netstat.Template = err.Error()
+			} else {
+				netstat.Template = ""
 			}
 		}
 	}
+
 	return stat
 }
 
@@ -370,7 +353,7 @@ func (oss *OSService) setReadyCondition(stat *vmv1.VirtualMachineStatus, isready
 
 }
 
-func (oss *OSService) syncResourceStat(auth *vmv1.AuthSpec, stat *vmv1.ResourceStatus, tmpfpath, newhash string) (*GetRst, error) {
+func (oss *OSService) syncResourceStat(auth *vmv1.AuthSpec, stat *vmv1.ResourceStatus, tmpfpath, newhash string) error {
 	var (
 		stackname  = stat.StackName
 		id         string
@@ -378,41 +361,32 @@ func (oss *OSService) syncResourceStat(auth *vmv1.AuthSpec, stat *vmv1.ResourceS
 		updataTemp bool
 	)
 	if stat.HashId == "" {
-		//should create new resource
 		id, err = oss.createStack(stackname, tmpfpath, auth)
 		if err != nil {
-			if _, ok := err.(gophercloud.ErrDefault409); ok {
-				// stack exists
-				err = oss.auth.HeatList(auth, &stacks.ListOpts{Name: stackname}, func(rst *GetRst) bool {
-					id = rst.Id
-					return false
-				})
-			}
-			if err != nil {
-				oss.logger.Info("Creat stack failed", "error", err, "stackname", stackname)
-				return nil, err
-			}
+			oss.logger.Info("Creat stack failed", "error", err, "stackname", stackname)
+			return err
 		}
 		if id == "" {
 			err = fmt.Errorf("Id can not fetch by stackname: %s", stackname)
-			return nil, err
+			return err
 		}
-		oss.logger.Info("stack create success", "stackname", stackname)
+		oss.logger.Info("Stack create success", "stackname", stackname)
 		stat.StackID = id
 		stat.HashId = newhash
 		updataTemp = true
+
 	} else if stat.HashId != newhash {
 		err = oss.updateStack(stackname, stat.StackID, tmpfpath, auth)
 		if err != nil {
 			if _, ok := err.(gophercloud.ErrDefault409); !ok {
 				// stack exists
-				oss.logger.Info("service update stack failed", "stackname", stackname, "error", err)
-				return nil, err
+				oss.logger.Info("Update stack failed", "stackname", stackname, "error", err)
+				return err
 			} else {
 				oss.logger.Info("stack is updating", "stackname", stackname)
 			}
 		}
-		oss.logger.Info("stack update success", "stackname", stackname, "oldid", stat.HashId, "newid", newhash)
+		oss.logger.Info("Update stack success", "stackname", stackname)
 		updataTemp = true
 		stat.HashId = newhash
 	}
@@ -421,7 +395,7 @@ func (oss *OSService) syncResourceStat(auth *vmv1.AuthSpec, stat *vmv1.ResourceS
 		data, _ = yaml.YAMLToJSON(data)
 		stat.Template = string(data)
 	}
-	return oss.auth.HeatGet(auth, stackname, stat.StackID)
+	return nil
 }
 
 func (oss *OSService) createStack(name, tmppath string, auth *vmv1.AuthSpec) (string, error) {
@@ -433,7 +407,7 @@ func (oss *OSService) createStack(name, tmppath string, auth *vmv1.AuthSpec) (st
 			},
 		},
 		Timeout: heatTimeout,
-		Tags:    []string{oss.stackTag},
+		Tags:    []string{StackTag},
 	}
 	return oss.auth.HeatCreate(auth, ctOpts)
 }
@@ -446,29 +420,9 @@ func (oss *OSService) updateStack(name, id, tmppath string, auth *vmv1.AuthSpec)
 			},
 		},
 		Timeout: heatTimeout,
-		Tags:    []string{oss.stackTag},
+		Tags:    []string{StackTag},
 	}
 	return oss.auth.HeatUpdate(auth, name, id, Opts)
-}
-
-func samewith(src, dst []string) bool {
-	if dst == nil {
-		return true
-	}
-	if len(src) == 0 || len(src) != len(dst) {
-		return false
-	}
-	dst_map := make(map[string]struct{})
-	for _, m := range dst {
-		dst_map[m] = struct{}{}
-	}
-
-	for _, m := range src {
-		if _, ok := dst_map[m]; !ok {
-			return false
-		}
-	}
-	return true
 }
 
 func randstackName(suffix string) string {
@@ -483,7 +437,10 @@ func randSeq(n int) string {
 	return string(b)
 }
 
-func getStat(rst *GetRst) string {
+func getStat(rst *StackRst) string {
+	if rst == nil {
+		return ""
+	}
 	switch rst.Stat {
 	case S_UPDATE_IN_PROGRESS:
 		return string(vmv1.Updating)

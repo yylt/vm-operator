@@ -17,8 +17,6 @@ import (
 	"github.com/gophercloud/gophercloud/openstack"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/startstop"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
-	appcred "github.com/gophercloud/gophercloud/openstack/identity/v3/applicationcredentials"
-	"github.com/gophercloud/gophercloud/openstack/identity/v3/tokens"
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks"
 	"github.com/gophercloud/gophercloud/pagination"
 )
@@ -51,7 +49,7 @@ type ServerRst struct {
 	Id         string    `json:"id"`
 	CreateTime time.Time `json:"created"`
 
-	Addresses map[string][]servers.Address `json:"addresses"`
+	Addresses map[string][]servers.Address `json:"addresses,omitempty"`
 }
 
 type CredentialsRst struct {
@@ -60,11 +58,11 @@ type CredentialsRst struct {
 	Id     string `json:"id"`
 }
 
-type GetRst struct {
+type StackRst struct {
 	Stat   string                   `json:"id"`
 	Reason string                   `json:"stack_status"`
 	Id     string                   `json:"stack_status_reason"`
-	Outpus []map[string]interface{} `json:"outputs"`
+	Outpus []map[string]interface{} `json:"outputs,omitempty"`
 }
 
 type Auth struct {
@@ -133,45 +131,6 @@ func (a *Auth) authByCredential(id, name, secret string) (*gophercloud.ProviderC
 	return cli, nil
 }
 
-func (a *Auth) AppCredentialsGet(auth *vmv1.AuthSpec) (*CredentialsRst, error) {
-	client, err := a.identityClient(auth)
-	if err != nil {
-		return nil, err
-	}
-	tokeninfo := tokens.Get(client, auth.Token)
-	user, err := tokeninfo.ExtractUser()
-	if err != nil {
-		return nil, err
-	}
-	username := auth.ProjectID[:10]
-	var s struct {
-		Credresult *CredentialsRst `json:"application_credential"`
-	}
-	pages := appcred.List(client, user.ID, appcred.ListOpts{Name: username})
-	pages.EachPage(func(page pagination.Page) (b bool, err error) {
-		apps, err := appcred.ExtractApplicationCredentials(page)
-		if err != nil {
-			a.logger.Info("extract app credential page failed", "err", err)
-			return true, nil
-		}
-		for _, v := range apps {
-			if v.Name == username {
-				s.Credresult = &CredentialsRst{
-					Name: v.Name,
-					Id:   v.ID,
-				}
-				return false, nil
-			}
-		}
-		return true, nil
-	})
-	if s.Credresult != nil {
-		return s.Credresult, nil
-	}
-	err = appcred.Create(client, user.ID, appcred.CreateOpts{Name: username, Secret: username}).ExtractInto(&s)
-	return s.Credresult, err
-}
-
 func (a *Auth) ServerGet(auth *vmv1.AuthSpec, id string) (*ServerRst, error) {
 	client, err := a.serverClient(auth)
 	if err != nil {
@@ -230,7 +189,7 @@ func (a *Auth) ServerList(auth *vmv1.AuthSpec, opts *servers.ListOpts, fn func(r
 	})
 }
 
-func (a *Auth) HeatList(auth *vmv1.AuthSpec, opts *stacks.ListOpts, fn func(rst *GetRst) bool) error {
+func (a *Auth) HeatList(auth *vmv1.AuthSpec, opts *stacks.ListOpts, fn func(rst *StackRst) bool) error {
 	client, err := a.heatClient(auth)
 	if err != nil {
 		return err
@@ -241,7 +200,7 @@ func (a *Auth) HeatList(auth *vmv1.AuthSpec, opts *stacks.ListOpts, fn func(rst 
 		a.logger.Info(errtype, "stack", "list")
 		return pages.Err
 	}
-	var rst = new(GetRst)
+	var rst = new(StackRst)
 	return pages.EachPage(func(page pagination.Page) (bool, error) {
 		lists, err := stacks.ExtractStacks(page)
 		if err != nil {
@@ -260,7 +219,7 @@ func (a *Auth) HeatList(auth *vmv1.AuthSpec, opts *stacks.ListOpts, fn func(rst 
 	})
 }
 
-func (a *Auth) HeatGet(auth *vmv1.AuthSpec, name, id string) (*GetRst, error) {
+func (a *Auth) HeatGet(auth *vmv1.AuthSpec, name, id string) (*StackRst, error) {
 	client, err := a.heatClient(auth)
 	if err != nil {
 		return nil, err
@@ -280,7 +239,7 @@ func (a *Auth) HeatGet(auth *vmv1.AuthSpec, name, id string) (*GetRst, error) {
 			getresult.StatusReason = string(reason)
 		}
 	}
-	result := &GetRst{
+	result := &StackRst{
 		Id:     getresult.ID,
 		Stat:   getresult.Status,
 		Reason: getresult.StatusReason,

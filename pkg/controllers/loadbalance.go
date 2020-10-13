@@ -43,10 +43,9 @@ func (oss *OSService) hashNetwork(spec *vmv1.LoadBalanceSpec) string {
 
 // sync network
 // make sure networkspec and portmaps is not null
-func (oss *OSService) syncNet(tmpfpath string, spec *vmv1.VirtualMachineSpec, stat *vmv1.VirtualMachineStatus) (bool, error) {
+func (oss *OSService) syncNet(tmpfpath string, spec *vmv1.VirtualMachineSpec, stat *vmv1.VirtualMachineStatus) error {
 	var (
 		stackname string
-		done      bool
 		netstat   *vmv1.ResourceStatus
 	)
 
@@ -67,20 +66,29 @@ func (oss *OSService) syncNet(tmpfpath string, spec *vmv1.VirtualMachineSpec, st
 	data, _ := ioutil.ReadFile(tmpfpath)
 	tempHash := fmt.Sprintf("%d", hashid(data))
 
-	result, err := oss.syncResourceStat(spec.Auth, netstat, tmpfpath, tempHash)
+	err := oss.syncResourceStat(spec.Auth, netstat, tmpfpath, tempHash)
 	if err != nil {
 		netstat.Stat = Failed
-		return done, err
+		return err
 	}
-	oss.logger.Info(fmt.Sprintf("network result: %+v", result))
-	netstat.Stat = getStat(result)
-	switch netstat.Stat {
-	case Succeeded:
-		done = true
-		err = fmt.Errorf(result.Reason)
-	case Failed:
-		err = fmt.Errorf(result.Reason)
+	item := oss.WokerM.GetItem(netstat.StackID)
+	if item == nil {
+		err = oss.WokerM.SetItem(NewWorkItem(spec.Auth.ProjectID, netstat.StackID, netstat.StackName, ""))
+		if err != nil {
+			return err
+		}
+		return nil
 	}
-	return done, err
-
+	item.Get(func(_ map[string]*ServerItem, st *StackRst) {
+		switch getStat(st) {
+		case Succeeded:
+			err = NewSuccessErr(st.Reason)
+			netstat.Stat = Succeeded
+		case Failed:
+			err = fmt.Errorf(st.Reason)
+			netstat.Stat = Failed
+		default:
+		}
+	})
+	return err
 }

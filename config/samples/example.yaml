@@ -1,3 +1,4 @@
+# ./manager -kubeconfig /root/.kube/config -net-tpl ./loadbalance.tpl -vm-tpl ./vm.tpl -sync-period 60
 apiVersion: mixapp.easystack.io/v1
 kind: VirtualMachine
 metadata:

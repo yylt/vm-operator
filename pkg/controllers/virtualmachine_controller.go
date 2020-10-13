@@ -18,7 +18,9 @@ package controllers
 
 import (
 	"context"
+
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
+
 	"github.com/go-logr/logr"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -86,7 +88,8 @@ func (r *VirtualMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, err
 		case vmv1.Start:
 			fallthrough
 		case vmv1.Stop:
-			stat, err = r.osService.ServerRecocile(&vm)
+			r.osService.ServerRecocile(&vm)
+			fallthrough
 		case vmv1.Creating:
 			fallthrough
 		case vmv1.Updating:
