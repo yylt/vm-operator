@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"reflect"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
 
@@ -112,21 +113,27 @@ func (r *VirtualMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, err
 func (r *VirtualMachineReconciler) doUpdateVmCrdStatus(nsname types.NamespacedName, stat *vmv1.VirtualMachineStatus) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		original := &vmv1.VirtualMachine{}
+		var isup bool
 		if err := r.Get(r.ctx, nsname, original); err != nil {
 			r.logger.Error(err, "get object failed", "object", nsname.String())
 			return err
 		}
-		original.Status = *stat
+		if !reflect.DeepEqual(&original.Status, stat) {
+			stat.DeepCopyInto(&original.Status)
+			isup = true
+		}
 		if original.DeletionTimestamp != nil {
 			original.Finalizers = nil
 			r.logger.Info("delete finalizers", "object", nsname.String())
-			return r.Update(r.ctx, original)
-		} else {
-			if original.Finalizers == nil {
-				original.Finalizers = append(original.Finalizers, nsname.String())
-				r.logger.Info("set finalizers", "object", nsname.String())
-			}
+			isup = true
+		} else if original.Finalizers == nil {
+			original.Finalizers = append(original.Finalizers, nsname.String())
+			r.logger.Info("set finalizers", "object", nsname.String())
+			isup = true
+		}
+		if isup {
 			return r.Update(r.ctx, original)
 		}
+		return nil
 	})
 }

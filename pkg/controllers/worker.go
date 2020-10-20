@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"bytes"
 	"fmt"
 	"sync"
 	"time"
@@ -19,7 +20,7 @@ type ServerItem struct {
 	Id         string
 	CreateTime time.Time
 
-	Ip4addr string
+	Ip4addrs map[string]string
 }
 
 // If ServerName is not null, it is nova stack else lb stack
@@ -28,8 +29,8 @@ type WorkItem struct {
 	StackId    string
 	StackName  string
 	ServerName string
-
-	mu sync.RWMutex
+	Delete     bool
+	mu         sync.RWMutex
 
 	//Server Id as key
 	servers map[string]*ServerItem
@@ -54,7 +55,11 @@ func (i *WorkItem) Deepcopy(rst stacks.ListedStack) {
 		i.stack = &StackRst{}
 	}
 	i.stack.Id = rst.ID
-	i.stack.Reason = rst.StatusReason
+	read := bytes.NewBuffer([]byte(rst.StatusReason))
+	reason, _ := read.ReadBytes('\n')
+	if reason != nil {
+		i.stack.Reason = string(reason)
+	}
 	i.stack.Stat = rst.Status
 }
 
@@ -71,18 +76,18 @@ func (i *WorkItem) DeepcopyServer(s *ServerRst) {
 	serv, ok = i.servers[s.Id]
 	if !ok {
 		serv = new(ServerItem)
+		serv.Ip4addrs = make(map[string]string)
 		i.servers[s.Id] = serv
 	}
 	serv.Stat = s.Stat
 	serv.Name = s.Name
 	serv.CreateTime = s.CreateTime
 	serv.Id = s.Id
-Done:
-	for _, addrs := range s.Addresses {
+
+	for name, addrs := range s.Addresses {
 		for _, val := range addrs {
 			if val.Version == 4 {
-				serv.Ip4addr = val.Address
-				break Done
+				serv.Ip4addrs[name] = val.Address
 			}
 		}
 	}
@@ -134,11 +139,14 @@ func (wm *WorkManager) DelItem(id string) error {
 	if item == nil {
 		return fmt.Errorf("Not found id:%s item", id)
 	}
+	wm.mu.Lock()
+	item.Delete = true
+	wm.mu.Unlock()
 	heatc, err := openstack.NewOrchestrationV1(wm.provider, gophercloud.EndpointOpts{})
 	if err != nil {
 		return err
 	}
-	//TODO(y) delete server?
+	//TODO(y) delete server manual?
 	rst := stacks.Delete(heatc, item.StackName, id)
 	return rst.ExtractErr()
 }
@@ -180,10 +188,9 @@ func (wm *WorkManager) Run() {
 					continue
 				}
 				novas := servers.List(novac, servers.ListOpts{AllTenants: true})
-				//TODO tag should add ?
 				pages := stacks.List(heatc, stacks.ListOpts{AllTenants: true, Tags: StackTag})
 
-				wm.mu.RLock()
+				wm.mu.Lock()
 				err = pages.EachPage(func(page pagination.Page) (b bool, err error) {
 					lists, err := stacks.ExtractStacks(page)
 					if err != nil {
@@ -192,6 +199,11 @@ func (wm *WorkManager) Run() {
 					for index, li := range lists {
 						item, ok := wm.items[li.ID]
 						if ok {
+							if item.Delete {
+								delete(serverNames, item.StackName)
+								delete(wm.items, li.ID)
+								return true, nil
+							}
 							wm.log.V(2).Info(fmt.Sprintf("stack %d ,value:%v", index, li))
 							if item.ServerName != "" {
 								serverNames[item.ServerName] = item
@@ -201,11 +213,12 @@ func (wm *WorkManager) Run() {
 					}
 					return true, nil
 				})
-				wm.mu.RUnlock()
+				wm.mu.Unlock()
 				if err != nil {
 					wm.log.WithValues("model", "wm").Info("heat extract failed", "err", err.Error())
 				}
 				err = novas.EachPage(func(page pagination.Page) (bool, error) {
+					rst = rst[:0]
 					err = servers.ExtractServersInto(page, &rst)
 					if err != nil {
 						return false, err

@@ -259,6 +259,15 @@ func (a *Auth) HeatDelete(auth *vmv1.AuthSpec, name, id string) error {
 	return rst.ExtractErr()
 }
 
+func (a *Auth) HeatUpdateWithClient(procli *gophercloud.ProviderClient, name, id string, opts *stacks.UpdateOpts) error {
+	client, err := openstack.NewOrchestrationV1(procli, gophercloud.EndpointOpts{})
+	if err != nil {
+		return err
+	}
+	rst := stacks.Update(client, name, id, opts)
+	return rst.ExtractErr()
+}
+
 func (a *Auth) HeatUpdate(auth *vmv1.AuthSpec, name, id string, opts *stacks.UpdateOpts) error {
 	client, err := a.heatClient(auth)
 	if err != nil {

@@ -39,7 +39,7 @@ resources:
       admin_pass: {{ $.server.admin_pass }}
 {{ end }}
 {{ if $.server.user_data }}
-      user_data_format: RAW
+      user_data_format: SOFTWARE_CONFIG
       user_data: |
 {{ indent 8 $.server.user_data }}
 {{ end }}

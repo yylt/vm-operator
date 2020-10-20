@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-
 	"math/rand"
 	"os"
 	"path"
@@ -214,7 +213,7 @@ func (oss *OSService) Reconcile(vm *vmv1.VirtualMachine) (*vmv1.VirtualMachineSt
 		err = oss.syncComputer(tmpfpath, newspec, newstat)
 		if err != nil {
 			if _, ok := err.(*SuccessErr); !ok {
-				oss.logger.Info("Sync spec server failed", "err", err)
+				oss.logger.Info("Sync spec server done, Not sync lb.", "msg", err)
 				return newstat, err
 			}
 		}
@@ -288,7 +287,6 @@ func (oss *OSService) Delete(spec *vmv1.VirtualMachineSpec, stat *vmv1.VirtualMa
 			} else {
 				vmstat.Template = ""
 			}
-
 		}
 	}
 
@@ -353,13 +351,23 @@ func (oss *OSService) setReadyCondition(stat *vmv1.VirtualMachineStatus, isready
 
 }
 
-func (oss *OSService) syncResourceStat(auth *vmv1.AuthSpec, stat *vmv1.ResourceStatus, tmpfpath, newhash string) error {
+func (oss *OSService) syncResourceStat(auth *vmv1.AuthSpec, stat *vmv1.ResourceStatus, tmpfpath string) error {
 	var (
 		stackname  = stat.StackName
 		id         string
 		err        error
 		updataTemp bool
 	)
+
+	defer os.Remove(tmpfpath)
+
+	data, err := ioutil.ReadFile(tmpfpath)
+	if err != nil {
+		return err
+	}
+
+	newhash := fmt.Sprintf("%d", hashid(data))
+
 	if stat.HashId == "" {
 		id, err = oss.createStack(stackname, tmpfpath, auth)
 		if err != nil {
@@ -374,9 +382,10 @@ func (oss *OSService) syncResourceStat(auth *vmv1.AuthSpec, stat *vmv1.ResourceS
 		stat.StackID = id
 		stat.HashId = newhash
 		updataTemp = true
-
 	} else if stat.HashId != newhash {
-		err = oss.updateStack(stackname, stat.StackID, tmpfpath, auth)
+		oss.logger.Info("Stack update", "old hashid", stat.HashId, "new hashid", newhash)
+		// use drone user to update stack, the stack ownership is also who created
+		err = oss.updateStack(stackname, stat.StackID, tmpfpath, nil)
 		if err != nil {
 			if _, ok := err.(gophercloud.ErrDefault409); !ok {
 				// stack exists
@@ -391,9 +400,8 @@ func (oss *OSService) syncResourceStat(auth *vmv1.AuthSpec, stat *vmv1.ResourceS
 		stat.HashId = newhash
 	}
 	if updataTemp {
-		data, _ := ioutil.ReadFile(tmpfpath)
-		data, _ = yaml.YAMLToJSON(data)
-		stat.Template = string(data)
+		bs, _ := yaml.YAMLToJSON(data)
+		stat.Template = string(bs)
 	}
 	return nil
 }
@@ -421,6 +429,9 @@ func (oss *OSService) updateStack(name, id, tmppath string, auth *vmv1.AuthSpec)
 		},
 		Timeout: heatTimeout,
 		Tags:    []string{StackTag},
+	}
+	if auth == nil {
+		return oss.auth.HeatUpdateWithClient(oss.WokerM.provider, name, id, Opts)
 	}
 	return oss.auth.HeatUpdate(auth, name, id, Opts)
 }
@@ -451,7 +462,7 @@ func getStat(rst *StackRst) string {
 	case S_CREATE_FAILED:
 		return Failed
 	case S_UPDATE_COMPLETE:
-		return Succeeded
+		fallthrough
 	case S_CREATE_COMPLETE:
 		return Succeeded
 	default:

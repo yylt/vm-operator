@@ -95,7 +95,7 @@ func (p *PodIp) sync(timed time.Duration) {
 					if val.hashid == hashid {
 						continue
 					}
-					p.logger.Info("start sync k8s service", "link", val.link)
+					p.logger.V(2).Info("start sync k8s service", "link", val.link)
 					if val.isdelete == true {
 						err = p.syncsvc(lbip, val)
 						if err != nil {
@@ -110,7 +110,7 @@ func (p *PodIp) sync(timed time.Duration) {
 						continue
 					}
 					val.hashid = hashid
-					p.logger.Info("sync k8s service successs", "lbip", lbip, "link", val.link)
+					p.logger.V(2).Info("sync k8s service successs", "lbip", lbip, "link", val.link)
 				}
 				p.mu.RUnlock()
 			}
@@ -153,7 +153,7 @@ func (p *PodIp) syncsvc(lbip string, val *info) error {
 	} else {
 		//update
 		if _, ok := ns_map[res.namespace]; !ok {
-			p.logger.Info("patch k8s service", "name", res.svcname, "ns", res.namespace, "value", svcunstruct.Object)
+			p.logger.V(2).Info("patch k8s service", "name", res.svcname, "ns", res.namespace, "value", svcunstruct.Object)
 			data, err := json.Marshal(svcunstruct.Object["spec"])
 			_, err = p.client.Resource(gvk).Namespace(res.namespace).Patch(res.svcname, types.MergePatchType, data, metav1.PatchOptions{})
 			if err != nil {
@@ -391,7 +391,7 @@ func getPodSecondIps(logger logr.Logger, client dynamic.Interface, link string, 
 	//logger.Info("list pods on resource", "link", link, "label", buf.String())
 
 	for _, result := range results.Items {
-		logger.Info("Try find kuryrip", "pod", result.GetSelfLink())
+		logger.V(2).Info("Try find kuryrip", "pod", result.GetSelfLink())
 		err = kuryrIps(&result, fn)
 		if err != nil {
 			return err

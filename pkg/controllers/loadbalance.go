@@ -3,7 +3,6 @@ package controllers
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"sort"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
@@ -63,10 +62,7 @@ func (oss *OSService) syncNet(tmpfpath string, spec *vmv1.VirtualMachineSpec, st
 
 	netstat.Name = spec.LoadBalance.Name
 
-	data, _ := ioutil.ReadFile(tmpfpath)
-	tempHash := fmt.Sprintf("%d", hashid(data))
-
-	err := oss.syncResourceStat(spec.Auth, netstat, tmpfpath, tempHash)
+	err := oss.syncResourceStat(spec.Auth, netstat, tmpfpath)
 	if err != nil {
 		netstat.Stat = Failed
 		return err
@@ -80,14 +76,17 @@ func (oss *OSService) syncNet(tmpfpath string, spec *vmv1.VirtualMachineSpec, st
 		return nil
 	}
 	item.Get(func(_ map[string]*ServerItem, st *StackRst) {
-		switch getStat(st) {
+		statstr := getStat(st)
+		if statstr == "" {
+			err = nil
+			return
+		}
+		netstat.Stat = statstr
+		switch statstr {
 		case Succeeded:
 			err = NewSuccessErr(st.Reason)
-			netstat.Stat = Succeeded
-		case Failed:
-			err = fmt.Errorf(st.Reason)
-			netstat.Stat = Failed
 		default:
+			err = fmt.Errorf(st.Reason)
 		}
 	})
 	return err

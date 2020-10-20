@@ -2,11 +2,9 @@ package controllers
 
 import (
 	"bytes"
-	"fmt"
-	"io/ioutil"
-	"time"
-
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
+	"fmt"
+	"time"
 )
 
 func (oss *OSService) hashServer(spec *vmv1.ServerSpec) string {
@@ -26,8 +24,9 @@ func (oss *OSService) hashServer(spec *vmv1.ServerSpec) string {
 // create or update
 func (oss *OSService) syncComputer(tmpfpath string, spec *vmv1.VirtualMachineSpec, stat *vmv1.VirtualMachineStatus) error {
 	var (
-		stackname string
-		novastat  *vmv1.ResourceStatus
+		stackname, netname string
+		err                error
+		novastat           *vmv1.ResourceStatus
 	)
 
 	if stat.VmStatus == nil {
@@ -42,14 +41,10 @@ func (oss *OSService) syncComputer(tmpfpath string, spec *vmv1.VirtualMachineSpe
 		novastat.StackName = stackname
 	}
 	novastat.Name = spec.Server.Name
-
-	data, err := ioutil.ReadFile(tmpfpath)
-	if err != nil {
-		return err
+	if spec.Server.Subnet != nil {
+		netname = spec.Server.Subnet.NetworkName
 	}
-	tempHash := fmt.Sprintf("%d", hashid(data))
-
-	err = oss.syncResourceStat(spec.Auth, novastat, tmpfpath, tempHash)
+	err = oss.syncResourceStat(spec.Auth, novastat, tmpfpath)
 	if err != nil {
 		novastat.Stat = Failed
 		return err
@@ -65,32 +60,41 @@ func (oss *OSService) syncComputer(tmpfpath string, spec *vmv1.VirtualMachineSpe
 	}
 
 	ids := make(map[string]int)
+	// Index members, server id as key, server index as value
 	for i, mem := range stat.Members {
 		ids[mem.Id] = i
 	}
 	item.Get(func(novas map[string]*ServerItem, st *StackRst) {
-		for _, item := range novas {
-			if v, ok := ids[item.Id]; ok {
-				stat.Members[v].Ip = item.Ip4addr
-				stat.Members[v].Stat = item.Stat
-			} else {
-				stat.Members = append(stat.Members, &vmv1.ServerStat{
-					Id:         item.Id,
-					CreateTime: item.CreateTime.Format(time.RFC3339),
-					Stat:       item.Stat,
-					Ip:         item.Ip4addr,
-					Name:       item.Name,
-				})
-			}
+		statstr := getStat(st)
+		if statstr == "" {
+			err = nil
+			return
 		}
-		switch getStat(st) {
+		stat.VmStatus.Stat = statstr
+		switch statstr {
 		case Succeeded:
 			err = NewSuccessErr(st.Reason)
-			stat.VmStatus.Stat = Succeeded
-		case Failed:
-			err = fmt.Errorf(st.Reason)
-			stat.VmStatus.Stat = Failed
+			for _, item := range novas {
+				ipstr, ok := item.Ip4addrs[netname]
+				if !ok {
+					continue
+				}
+				oss.logger.Info("add server", "server id", item.Id, "server ip", ipstr)
+				if v, ok := ids[item.Id]; ok {
+					stat.Members[v].Ip = ipstr
+					stat.Members[v].Stat = item.Stat
+				} else {
+					stat.Members = append(stat.Members, &vmv1.ServerStat{
+						Id:         item.Id,
+						CreateTime: item.CreateTime.Format(time.RFC3339),
+						Stat:       item.Stat,
+						Ip:         ipstr,
+						Name:       item.Name,
+					})
+				}
+			}
 		default:
+			err = fmt.Errorf(st.Reason)
 		}
 	})
 	return err
