@@ -25,103 +25,87 @@ import (
 
 	mixappv1 "easystack.io/vm-operator/pkg/api/v1"
 	"easystack.io/vm-operator/pkg/controllers"
+	"easystack.io/vm-operator/pkg/manage"
+	"easystack.io/vm-operator/pkg/template"
 
-	uberzap "go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	klog "k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 var (
-	scheme                  = runtime.NewScheme()
-	setupLog                = ctrl.Log.WithName("setup")
-	metricsAddr, healthAddr string
-	enableLeaderElection    bool
-	nettpl, vmtpl, tmpdir   string
-	podperiod, syncperiod   int64
-	identify, leaderId      string
-	level                   int
+	scheme = runtime.NewScheme()
+
+	enableLeaderElection          bool
+	nettpl, vmtpl, fiptpl, tmpdir string
 )
 
 func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
 
 	_ = mixappv1.AddToScheme(scheme)
-	// +kubebuilder:scaffold:scheme
 
-}
-
-func setlevel(st int) uberzap.AtomicLevel {
-	lvl := zapcore.Level(st)
-	return uberzap.NewAtomicLevelAt(lvl)
+	rand.Seed(time.Now().UnixNano())
 }
 
 func main() {
+	var (
+		leaderid = "vm.controller"
+	)
+
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
-		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
-	flag.IntVar(&level, "V", 0, "log level, 0/1/2")
-	flag.StringVar(&metricsAddr, "metrics-addr", "127.0.0.1:9446", "The address the metric endpoint binds to.")
-	flag.StringVar(&healthAddr, "health-addr", "", "The address the health endpoint binds to.")
+		"Enabling this will ensure only one active controller manager.")
+
 	flag.StringVar(&nettpl, "net-tpl", "/opt/network.tpl", "net tpl file path")
 	flag.StringVar(&vmtpl, "vm-tpl", "/opt/vm.tpl", "vm tpl file path")
-	flag.StringVar(&tmpdir, "tmp-dir", "/tmp", "tmp dir ,should can write ")
-	flag.StringVar(&identify, "identify-addr", "http://keystone-api.openstack.svc.cluster.local/v3", "identify address.")
+	flag.StringVar(&fiptpl, "fip-tpl", "/opt/fip.tpl", "floatip tpl file path")
+	flag.StringVar(&tmpdir, "tmp-dir", "/tmp", "must have write permission on this dir")
 
-	flag.Int64Var(&syncperiod, "sync-period", 100, "sync time duration second")
-	flag.Int64Var(&podperiod, "pod-period", 60, "sync time duration second")
-	flag.StringVar(&leaderId, "leaderId", "vm.controller", "sync time duration second")
+	optime := flag.Duration("openstack-sync-period", time.Second*30, "sync time which openstack fetch resource")
+	k8time := flag.Duration("k8s-sync-period", time.Second*30, "sync time which k8s sync external service")
+	syncdu := flag.Duration("sync-period", time.Second*35, "controller manager sync resource time duration")
+
+	klog.InitFlags(nil)
+
 	flag.Parse()
-
-	rand.Seed(time.Now().UnixNano())
-
-	lvl := setlevel(level)
-	ctrl.SetLogger(zap.New(zap.UseDevMode(true), zap.Level(&lvl)))
-
-	sync := time.Duration(int64(time.Second) * syncperiod)
-	worksync := time.Duration(int64(time.Second) * syncperiod / 2)
 
 	config := ctrl.GetConfigOrDie()
 
 	opt := ctrl.Options{
-		SyncPeriod:             &sync,
-		HealthProbeBindAddress: healthAddr,
-		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9446,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       leaderId,
+		SyncPeriod:         syncdu,
+		Scheme:             scheme,
+		MetricsBindAddress: "0",
+		LeaderElection:     enableLeaderElection,
+		LeaderElectionID:   leaderid,
 	}
 
 	mgr, err := ctrl.NewManager(config, opt)
 	if err != nil {
-		setupLog.Error(err, "unable to create manager")
+		klog.Errorf("create runtime manager failed:%v", err)
 		os.Exit(1)
 	}
 
 	client, err := dynamic.NewForConfig(ctrl.GetConfigOrDie())
 	if err != nil {
-		setupLog.Error(err, "unable to create dynamic client")
+		klog.Errorf("create dynamic client failed:%v ", err)
 		os.Exit(1)
 	}
+	k8smgr := manage.NewK8sMgr(client)
 
-	synck8s := controllers.NewPodIp(time.Duration(int64(time.Second)*podperiod), ctrl.Log, client)
-	wm := controllers.NewWorkers(worksync, ctrl.Log)
-	oss := controllers.NewOSService(nettpl, vmtpl, tmpdir, identify, wm, synck8s, ctrl.Log)
+	tempengine := template.NewTemplate()
+	tempengine.AddTempFileMust(template.Fip, fiptpl)
+	tempengine.AddTempFileMust(template.Lb, nettpl)
+	tempengine.AddTempFileMust(template.Vm, vmtpl)
 
-	vm := controllers.NewVirtualMachine(mgr.GetClient(), mgr.GetAPIReader(), ctrl.Log, oss)
-	if err = vm.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to setup manager")
-		os.Exit(1)
-	}
+	server := controllers.NewServer(tempengine, tmpdir, k8smgr, enableLeaderElection, *k8time, *optime)
 
-	// +kubebuilder:scaffold:builder
-	setupLog.Info("starting manager")
+	controllers.NewVirtualMachine(mgr, server)
+
+	klog.Infof("manager start")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
+		klog.Errorf("start manager failed:%v", err)
 		os.Exit(1)
 	}
 }

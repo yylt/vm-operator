@@ -18,38 +18,48 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
 
-	"github.com/go-logr/logr"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	cli "sigs.k8s.io/controller-runtime/pkg/client"
+
+	klog "k8s.io/klog/v2"
 )
 
 // VirtualMachineReconciler reconciles a VirtualMachine object
 type VirtualMachineReconciler struct {
 	cli.Client
-	logger    logr.Logger
-	scheme    *runtime.Scheme
-	ctx       context.Context
-	osService *OSService
+	ctx    context.Context
+	server *Server
 }
 
-func NewVirtualMachine(c cli.Client, r cli.Reader, logger logr.Logger, oss *OSService) *VirtualMachineReconciler {
-	return &VirtualMachineReconciler{
-		Client:    c,
-		logger:    logger,
-		ctx:       context.Background(),
-		osService: oss,
+func NewVirtualMachine(mgr ctrl.Manager, mg *Server) *VirtualMachineReconciler {
+	vmm := &VirtualMachineReconciler{
+		Client: mgr.GetClient(),
+		ctx:    context.Background(),
+		server: mg,
 	}
+	err := vmm.probe(mgr)
+	if err != nil {
+		panic(err)
+	}
+	return vmm
 }
 
-func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *VirtualMachineReconciler) probe(mgr ctrl.Manager) error {
+	var (
+		err error
+	)
+	err = mgr.Add(r.server)
+	if err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
 		Complete(r)
@@ -57,56 +67,59 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // +kubebuilder:rbac:groups=mixapp.easystack.io,resources=virtualmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=mixapp.easystack.io,resources=virtualmachines/status,verbs=get;update;patch
-
-func (r *VirtualMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
+func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var (
-		vm   vmv1.VirtualMachine
-		err  error
-		stat *vmv1.VirtualMachineStatus
+		vm  vmv1.VirtualMachine
+		err error
 	)
 
-	err = r.Get(r.ctx, req.NamespacedName, &vm)
+	err = r.Get(ctx, req.NamespacedName, &vm)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
 			// Delete event
-			r.logger.Info("object had deleted", "object", req.String())
+			klog.Infof("object %s had deleted", req.String())
 			return ctrl.Result{}, nil
 		}
-		r.logger.Error(err, "get object failed", "object", req.String())
+		klog.Errorf("get object %s failed:%s", req.String(), err)
 	}
-	if vm.DeletionTimestamp != nil {
-		r.logger.Info("object is deleting", "object", req.String())
-		stat = r.osService.Delete(&vm.Spec, vm.Status.DeepCopy())
+	newvmobj := &vm
+
+	if newvmobj.DeletionTimestamp != nil {
+		klog.V(2).Infof("object %s is deleting", req.String())
+		r.server.Process(newvmobj)
 	} else {
-		if vm.Spec.Auth == nil {
-			r.logger.Info("Not define auth info in spec", "object", req.String())
-			return ctrl.Result{}, err
-		}
-		r.logger.Info("START Reconcile", "object", req.String())
-		switch vm.Spec.AssemblyPhase {
+		klog.V(2).Infof("START Reconcile:%s", req.String())
+		switch newvmobj.Spec.AssemblyPhase {
 		case vmv1.Recreate:
 			fallthrough
 		case vmv1.Start:
 			fallthrough
 		case vmv1.Stop:
-			r.osService.ServerRecocile(&vm)
+			r.server.ServerRecocile(newvmobj)
 			fallthrough
 		case vmv1.Creating:
 			fallthrough
 		case vmv1.Updating:
-			stat, err = r.osService.Reconcile(&vm)
+			r.server.Process(newvmobj)
 		case vmv1.Deleting:
-			stat = r.osService.Delete(&vm.Spec, vm.Status.DeepCopy())
+			err = r.Delete(r.ctx, newvmobj)
+			if err != nil {
+				klog.Errorf("delete object %s failed:%v", req.String(), err)
+				return ctrl.Result{}, nil
+			}
 		default:
-			r.logger.Info("Not found assemblyPhase", "object", req.String())
+			updateCondition(&newvmobj.Status, OpCheck, fmt.Errorf("not found assemblyPhase in spec"))
 			return ctrl.Result{}, nil
 		}
 	}
-	if stat == nil {
+	if &newvmobj.Status == nil {
 		return ctrl.Result{}, err
 	}
-	//stat.DeepCopyInto(&vm.Status)
-	err = r.doUpdateVmCrdStatus(req.NamespacedName, stat)
+
+	err = r.doUpdateVmCrdStatus(req.NamespacedName, &newvmobj.Status)
+	if err != nil {
+		klog.Errorf("update cr failed:%v", err)
+	}
 	return ctrl.Result{}, err
 }
 
@@ -115,7 +128,7 @@ func (r *VirtualMachineReconciler) doUpdateVmCrdStatus(nsname types.NamespacedNa
 		original := &vmv1.VirtualMachine{}
 		var isup bool
 		if err := r.Get(r.ctx, nsname, original); err != nil {
-			r.logger.Error(err, "get object failed", "object", nsname.String())
+			klog.Errorf("get object %s failed:%v", nsname.String(), err)
 			return err
 		}
 		if !reflect.DeepEqual(&original.Status, stat) {
@@ -124,11 +137,11 @@ func (r *VirtualMachineReconciler) doUpdateVmCrdStatus(nsname types.NamespacedNa
 		}
 		if original.DeletionTimestamp != nil {
 			original.Finalizers = nil
-			r.logger.Info("delete finalizers", "object", nsname.String())
+			klog.Infof("remove finalizers: %v", nsname.String())
 			isup = true
 		} else if original.Finalizers == nil {
 			original.Finalizers = append(original.Finalizers, nsname.String())
-			r.logger.Info("set finalizers", "object", nsname.String())
+			klog.Infof("add finalizers: %v", nsname.String())
 			isup = true
 		}
 		if isup {

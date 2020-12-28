@@ -1,5 +1,4 @@
 heat_template_version: 2016-10-14
-
 resources:
   ######################################################################
   #
@@ -27,10 +26,24 @@ resources:
       availability_zone: {{ $.server.availability_zone }}
 {{ end }}
 
+  port{{ $intindex }}:
+    type: 'OS::Neutron::Port'
+    properties:
+      network: {{ $.server.subnet.network_name }}
+      replacement_policy: AUTO
+{{ if $.server.security_groups }}
+      security_groups:
+{{ range $index, $v := $.server.security_groups }}
+        - {{ $v }}
+{{ end }}
+{{ end }}
+      fixed_ips:
+        - subnet: {{ $.server.subnet.subnet_id }}
+
   node{{ $intindex }}:
     type: OS::Nova::Server
     properties:
-      name: {{ $.server.name }}
+      name: {{ $.server.name }}-{{ $intindex }}
       flavor: {{ $.server.flavor }}
 {{ if $.server.key_name }}
       key_name: {{ $.server.key_name }}
@@ -39,12 +52,12 @@ resources:
       admin_pass: {{ $.server.admin_pass }}
 {{ end }}
 {{ if $.server.user_data }}
-      user_data_format: SOFTWARE_CONFIG
-      user_data: |
+      user_data: |-
 {{ indent 8 $.server.user_data }}
 {{ end }}
       networks:
-        - subnet: {{ $.server.subnet.subnet_id }}
+        - port:
+            get_resource: port{{ $intindex }}
       availability_zone: {{ $.server.availability_zone }}
       block_device_mapping_v2:
         - boot_index: 0
@@ -62,7 +75,6 @@ resources:
 {{ end }}
 
 
-
 {{ if $.server.security_groups }}
       security_groups:
 {{ range $index, $v := $.server.security_groups }}
@@ -72,9 +84,3 @@ resources:
 
 {{ end }}
 
-
-outputs:
-{{range $intindex := intRange .server.replicas }}
-  node{{ $intindex }}:
-    value: {get_attr: [ node{{ $intindex }} ] }
-{{ end }}

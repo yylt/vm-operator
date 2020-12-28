@@ -2,28 +2,24 @@ package template
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
-	"github.com/go-logr/logr"
 	"github.com/tidwall/gjson"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 var (
-	log    logr.Logger
 	engine *Template
 )
 
 func init() {
-	log = zap.New(zap.WriteTo(os.Stdout))
-	engine = NewTemplate(log)
+
+	engine = NewTemplate()
 }
 
 func TestAddTempFileMust(t *testing.T) {
-	engine.AddTempFileMust("net", "./files/loadbalance.tpl")
-	engine.AddTempFileMust("vm", "./files/vm.tpl")
+	engine.AddTempFileMust(Lb, "./files/loadbalance.tpl")
+	engine.AddTempFileMust(Vm, "./files/vm.tpl")
 }
 
 func TestRenderByName(t *testing.T) {
@@ -76,9 +72,9 @@ func TestRenderByName(t *testing.T) {
 			t.Fatalf(err.Error())
 		}
 		params := Parse(gjson.ParseBytes(bs))
-		bs, err = engine.RenderByName("vm", params)
+		bs, err = engine.RenderByName(Vm, params)
 		t.Logf("vm: %s err:%s", bs, err)
-		bs, err = engine.RenderByName("net", params)
+		bs, err = engine.RenderByName(Lb, params)
 		t.Logf("net: %s err:%s", bs, err)
 	}
 }
