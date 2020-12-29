@@ -203,7 +203,6 @@ spec:
               required:
               - availability_zone
               - flavor
-              - name
               - replicas
               - subnet
               type: object

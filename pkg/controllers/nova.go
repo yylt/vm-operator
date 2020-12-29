@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"bytes"
 	"fmt"
 	"sync"
 
@@ -74,7 +73,7 @@ type Nova struct {
 
 	mu sync.RWMutex
 	// key: the name which cut suffix [-x]
-	// value: vmname : VmResults
+	// value: vm-id : VmResults
 	vms map[string]map[string]*VmResult
 }
 
@@ -110,24 +109,18 @@ func (p *Nova) addVmStore(page pagination.Page) {
 		klog.Errorf("servers extract page failed:%v", err)
 		return
 	}
-	prefix := prefixName()
+
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	for _, sv := range svs {
-		svbyte := []byte(sv.Name)
-		if !bytes.HasPrefix(svbyte, prefix) {
-			continue
-		}
-		// NOTE: cut last two byte, thus always "-[0-9]"
-		// Require replicse can not bigger than 9
-		v, ok := p.vms[string(svbyte[:len(svbyte)-2])]
+		v, ok := p.vms[sv.Name]
 		if ok {
-			klog.V(3).Infof("update nova stat:%v", sv)
-			result, ok := v[sv.Name]
+			klog.V(3).Infof("callback update nova:%v", sv)
+			result, ok := v[sv.Id]
 			if ok {
 				result.DeepCopyFrom(sv)
 			} else {
-				v[sv.Name] = sv.DeepCopy()
+				v[sv.Id] = sv.DeepCopy()
 			}
 		}
 	}
@@ -167,12 +160,11 @@ func (p *Nova) update(stat *vmv1.VirtualMachineStatus, netspec *vmv1.ServerSpec)
 	}
 	for _, vm := range svs {
 		index, ok := memmaps[vm.Id]
+		klog.V(3).Infof("update nova ResourceStatus: %v", vm)
 		if ok {
-			klog.V(3).Infof("update nova ResourceStatus: %v", vm)
 			vm.DeepCopyInto(netspec.Subnet.NetworkName, stat.Members[index])
 		} else {
 			newmem := &vmv1.ServerStat{}
-			klog.V(3).Infof("update nova ResourceStatus: %v", vm)
 			vm.DeepCopyInto(netspec.Subnet.NetworkName, newmem)
 			vmstat = append(vmstat, newmem)
 		}
@@ -195,7 +187,9 @@ func (p *Nova) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	if err != nil {
 		return err
 	}
-
+	if spec.Name == "" {
+		spec.Name = "vm"
+	}
 	defer func() {
 		//Remove stack if pod link not exist
 		if removeRes {
@@ -219,7 +213,7 @@ func (p *Nova) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	}
 	// 1. prefixName used as filter prefix key
 	// 2. rand string to dict same name
-	resname := fmt.Sprintf("%s-%s-%s", prefixName(), spec.Name, util.RandStr(5))
+	resname := fmt.Sprintf("%s-%s", spec.Name, util.RandStr(5))
 	if stat == nil || stat.StackName == "" {
 		vm.Status.VmStatus = &vmv1.ResourceStatus{
 			StackName: resname,
@@ -240,12 +234,5 @@ func validVmSpec(spec *vmv1.ServerSpec) error {
 	if spec.BootImage == "" && spec.BootVolumeId == "" {
 		return fmt.Errorf("Boot image or boot volume must not nil both!")
 	}
-	if spec.Replicas > 9 {
-		return fmt.Errorf("replicas must little than 10!")
-	}
 	return nil
-}
-
-func prefixName() []byte {
-	return []byte(manage.Vm.String())
 }

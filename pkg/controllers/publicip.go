@@ -80,7 +80,7 @@ func (p *port) addPortStore(page pagination.Page) {
 	for _, port := range lists {
 		v, ok := p.ports[port.Name]
 		if ok {
-			klog.V(2).Infof("update port stat:%v", port)
+			klog.V(2).Infof("callback update port stat:%v", port)
 			v.DeepCopyFrom(&port)
 		}
 	}
@@ -159,12 +159,12 @@ func (p *Floatip) addFipStore(pages pagination.Page) {
 	for _, fip := range lists {
 		v, ok := p.fips[fip.PortID]
 		if ok {
-			klog.V(3).Infof("update floating ip stat: %v", fip)
+			klog.V(3).Infof("callback update floating ip stat: %v", fip)
 			v.DeepCopyFrom(&fip)
 		}
 		staticv, ok := p.statics[fip.FloatingIP]
 		if ok {
-			klog.V(3).Infof("update static floating ip stat: %v", fip)
+			klog.V(3).Infof("callback update  static floating ip stat: %v", fip)
 			staticv.DeepCopyFrom(&fip)
 		}
 	}

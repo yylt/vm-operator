@@ -101,7 +101,7 @@ func (p *LoadBalance) addLbStore(page pagination.Page) {
 	for _, lb := range lists {
 		v, ok := p.lbs[lb.Name]
 		if ok {
-			klog.V(3).Infof("update load balance stat: %v", lb)
+			klog.V(3).Infof("callback update loadbalance: %v", lb)
 			v.DeepCopyFrom(&lb)
 		}
 	}

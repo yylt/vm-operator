@@ -109,7 +109,8 @@ func (h *Heat) update(stat *vmv1.ResourceStatus) error {
 			Status: stat.Stat,
 		}
 	}
-	stat.Stat = getStackStat(h.stacks[stat.StackID])
+	v = h.stacks[stat.StackID]
+	stat.Stat = getStackStat(v)
 	if stat.Stat == Failed {
 		return fmt.Errorf(v.StatusReason)
 	}
@@ -127,7 +128,7 @@ func (h *Heat) addStore(page pagination.Page) {
 	for _, stack := range lists {
 		v, ok := h.stacks[stack.ID]
 		if ok {
-			klog.V(3).Infof("update stack stat:%v", stack)
+			klog.V(3).Infof("callback update stack:%v", stack)
 			v.DeepCopyFrom(&stack)
 		}
 	}
@@ -177,6 +178,9 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) error {
 		err = h.createStack(fpath, vm.Spec.Auth, stat)
 		if err != nil {
 			klog.Errorf("Creat stack failed:%v", err)
+			if stat.StackID == "" {
+				return err
+			}
 		}
 		stat.HashId = hashid
 	}
@@ -296,7 +300,7 @@ func (h *Heat) DeleteStack(stat *vmv1.ResourceStatus) error {
 		} else {
 			stat.StackID = ""
 			stat.StackName = ""
-			klog.Infof("success delete stack)")
+			klog.V(3).Infof("success delete stack")
 		}
 	})
 	return nil

@@ -66,7 +66,7 @@ type VolumeSpec struct {
 
 type ServerSpec struct {
 	Replicas       int32         `json:"replicas"`
-	Name           string        `json:"name"`
+	Name           string        `json:"name,omitempty"`
 	BootImage      string        `json:"boot_image,omitempty"`
 	BootVolumeId   string        `json:"boot_volume_id,omitempty"`
 	Flavor         string        `json:"flavor"`

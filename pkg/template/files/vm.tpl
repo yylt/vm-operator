@@ -43,7 +43,7 @@ resources:
   node{{ $intindex }}:
     type: OS::Nova::Server
     properties:
-      name: {{ $.server.name }}-{{ $intindex }}
+      name: {{ $.server.name }}
       flavor: {{ $.server.flavor }}
 {{ if $.server.key_name }}
       key_name: {{ $.server.key_name }}
