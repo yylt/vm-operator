@@ -1,18 +1,18 @@
 heat_template_version: 2016-10-14
-
 resources:
   ######################################################################
   #
-  # loadbalance
+  # load balance
   #
-
 
   lb:
     type: 'OS::Neutron::LBaaS::LoadBalancer'
     properties:
       name: {{ .loadbalance.name }}
       vip_subnet: {{ .loadbalance.subnet.subnet_id }}
+{{ if .loadbalance.loadbalance_ip }}
       vip_address: {{ .loadbalance.loadbalance_ip }}
+{{ end }}
 
 {{ range $index, $v := $.loadbalance.port_map }}
 
@@ -44,10 +44,4 @@ resources:
       weight: 1
       address: {{ $ip }}
 {{ end }}
-
 {{ end }}
-
-
-outputs:
-  lb:
-    value: {get_attr: [ lb ] }

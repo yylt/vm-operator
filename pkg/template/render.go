@@ -1,46 +1,56 @@
 package template
 
 import (
-	"bytes"
 	"fmt"
 	"io/ioutil"
-	"sync"
 	"text/template"
 
+	"easystack.io/vm-operator/pkg/util"
+
 	"github.com/Masterminds/sprig"
-	"github.com/go-logr/logr"
 	"github.com/tidwall/gjson"
+	klog "k8s.io/klog/v2"
 )
 
-var (
-	bufpool = sync.Pool{
-		New: func() interface{} {
-			return new(bytes.Buffer)
-		},
+type Kind int
+
+const (
+	Lb Kind = iota
+	Fip
+	Vm
+)
+
+func (or Kind) String() string {
+	switch or {
+	case Lb:
+		return "lb"
+	case Vm:
+		return "nova"
+	case Fip:
+		return "fip"
+	default:
+		return ""
 	}
-)
-
-type Template struct {
-	tpls  map[string]*template.Template
-	funcs template.FuncMap
-	mu    sync.RWMutex
-	log   logr.Logger
 }
 
-func NewTemplate(logger logr.Logger) *Template {
+// Init at beginning, so ths tpls do not need locker
+type Template struct {
+	tpls  map[Kind]*template.Template
+	funcs template.FuncMap
+}
+
+func NewTemplate() *Template {
 	funcmap := sprig.TxtFuncMap()
 	funcmap["toChar"] = toChar
 	funcmap["intRange"] = intRange
 
 	return &Template{
-		tpls:  make(map[string]*template.Template),
-		mu:    sync.RWMutex{},
-		log:   logger,
+		tpls:  make(map[Kind]*template.Template),
 		funcs: funcmap,
 	}
 }
 
-func (t *Template) update(name, filepath string) error {
+func (t *Template) update(name Kind, filepath string) error {
 	bs, err := ioutil.ReadFile(filepath)
 	if err != nil {
 		return err
@@ -52,33 +62,24 @@ func (t *Template) update(name, filepath string) error {
 	return nil
 }
 
-func (t *Template) AddTempFileMust(name string, filepath string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if _, ok := t.tpls[name]; ok {
-		t.log.Info("render engine", "update name", name)
-	}
+func (t *Template) AddTempFileMust(name Kind, filepath string) {
 	err := t.update(name, filepath)
 	if err != nil {
 		panic(err)
 	}
-	t.log.Info("render engine", "add name", name, "filepath", filepath)
+	klog.Infof("add template type:%v, filepath:%v", name.String(), filepath)
 	return
 }
 
-func (t *Template) RenderByName(name string, params interface{}) ([]byte, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	buf := bufpool.Get().(*bytes.Buffer)
-	buf.Reset()
-	defer bufpool.Put(buf)
+func (t *Template) RenderByName(name Kind, params interface{}) ([]byte, error) {
+	buf := util.GetBuf()
+	defer util.PutBuf(buf)
 	if v, ok := t.tpls[name]; ok {
 		err := v.Execute(buf, params)
 		bs := buf.Bytes()
 		return bs, err
 	}
-	err := fmt.Errorf("%s not found template", name)
-	t.log.Error(err, "render tpl failed", "name", name)
+	err := fmt.Errorf("not found template by name:%v", name.String())
 	return nil, err
 }
 
