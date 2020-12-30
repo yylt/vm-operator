@@ -1,0 +1,58 @@
+swagger: "2.0"
+paths: {}
+definitions:
+  AuthSpec:
+    type: object
+    required:
+      - "token"
+      - "projectID"
+    properties:
+      token:
+        type: string
+      projectID:
+        type: string
+  PortMap:
+    type: object
+    required:
+      - "port"
+      - "protocol"
+    properties:
+      port:
+        type: integer
+        format: int64
+      protocol:
+        type: string
+      ips:
+        type: array
+        items:
+          type: string
+  SubnetSpec:
+    type: object
+    required:
+      - "network_name"
+      - "network_id"
+      - "subnet_name"
+      - "subnet_id"
+    properties:
+      network_name:
+        type: string
+      network_id:
+        type: string
+      subnet_name:
+        type: string
+      subnet_id:
+        type: string
+  VolumeSpec:
+    type: object
+    required:
+      - "port"
+      - "protocol"
+    properties:
+      volume_size:
+        type: integer
+        format: int64
+      volume_type:
+        type: string
+      volume_delete:
+        type: boolean
+

@@ -1,0 +1,56 @@
+# ./manager -kubeconfig /root/.kube/config -net-tpl ./loadbalance.tpl -vm-tpl ./vm.tpl -sync-period 60
+apiVersion: mixapp.easystack.io/v1
+kind: VirtualMachine
+metadata:
+  name: test-ap
+  namespace: vmc
+spec:
+  auth:
+    token: "gAAAAABf6Xap50q88xkUAtiva0ovhTzeHf6cmv28DQXx5QiEDqjv3uh3yaJ-DpqknJarkkMepB4w1QUG3ZdZLB39WVj_HP9a-0HNJzhLOk6Rwd3kqq8DqhbiS6UmqonlJQmEZNzjm3u72aoWFxdiycE-kmRquKWL3Jl1vS7wkqwI_pejKSTtYHg"
+    projectID: "7c81797e624642579e1312d32543b71e"
+  server:
+    replicas: 1
+    name: "test-app"
+    boot_image: TestVM
+    flavor: 1C-1G
+    availability_zone: "default-az"
+    admin_pass: "passw0rd"
+    boot_volume:
+      volume_delete: true
+      volume_type: "hdd"
+      volume_size: 4
+    volumes:
+    - volume_delete: true
+      volume_type: "hdd"
+      volume_size: 1
+    user_data: "echo test"
+    security_group:
+    - "default"
+    subnet:
+      subnet_id: b632f4f1-e8cf-4ad2-99dc-c95978c15d51
+      subnet_name: share_net__subnet
+      network_name: share_net
+      network_id: "e1e3c64d-faca-4f5c-b659-5b3e7ae319f9"
+  loadbalance:
+    #link: /apis/apps/v1/namespaces/test/deployments/pause
+    subnet:
+      subnet_id: b632f4f1-e8cf-4ad2-99dc-c95978c15d51
+      subnet_name: share_net__subnet
+      network_name: share_net
+      network_id: "e1e3c64d-faca-4f5c-b659-5b3e7ae319f9"
+    name: "net"
+    port_map:
+      - port: 443
+        protocol: "TCP"
+  publicip:
+    Mbps: 1
+    subnet:
+      subnet_id: b632f4f1-e8cf-4ad2-99dc-c95978c15d51
+      subnet_name: share_net__subnet
+      network_name: public_net
+      network_id: 97715e98-7d06-4f97-b175-85e829a495b8
+    address:
+      allocate: true
+      ip: 1.1.1.1
+    #link: /api/v1/namespaces/default/pods/nginx-xs89a
+  assemblyPhase: "Creating"
