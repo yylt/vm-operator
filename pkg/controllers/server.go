@@ -60,17 +60,14 @@ func (m *Server) Process(vm *vmv1.VirtualMachine) {
 	err = m.nova.Process(vm)
 	if err != nil {
 		updateCondition(&vm.Status, manage.Vm.String(), err)
-		return
 	}
 	err = m.lb.Process(vm)
 	if err != nil {
 		updateCondition(&vm.Status, manage.Lb.String(), err)
-		return
 	}
 	err = m.fip.Process(vm)
 	if err != nil {
 		updateCondition(&vm.Status, manage.Fip.String(), err)
-		return
 	}
 }
 

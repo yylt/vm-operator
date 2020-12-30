@@ -198,7 +198,8 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		// Try find poolmembers from nova info
 		ips = p.nova.GetAllIps(vm)
 		if len(ips) == 0 {
-			return fmt.Errorf("nova servers not ready!")
+			klog.Infof("nova servers not ready, can not fetch members")
+			return nil
 		}
 		sort.Strings(ips)
 		klog.V(3).Infof("fetch nova pool ip:%v", ips)

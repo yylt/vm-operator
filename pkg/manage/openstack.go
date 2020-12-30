@@ -142,7 +142,7 @@ func (om *OpenMgr) Loop(du time.Duration) {
 			klog.Infof("receive stop signal")
 			return
 		case <-time.NewTimer(du).C:
-			klog.V(3).Infof("start fetch openstack resource at %v", time.Now().Format(time.RFC3339))
+			klog.V(4).Infof("start fetch openstack resource at %v", time.Now().Format(time.RFC3339))
 			for k, fn := range om.fns {
 				var (
 					tmpk  = k
@@ -174,7 +174,7 @@ func (om *OpenMgr) Loop(du time.Duration) {
 				}
 			}
 			wg.Wait()
-			klog.V(3).Infof("end fetch openstack resource at %v", time.Now().Format(time.RFC3339))
+			klog.V(4).Infof("end fetch openstack resource at %v", time.Now().Format(time.RFC3339))
 		}
 	}
 }
