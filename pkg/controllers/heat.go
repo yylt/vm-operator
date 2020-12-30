@@ -268,6 +268,9 @@ func (h *Heat) createStack(fpath string, auth *vmv1.AuthSpec, stat *vmv1.Resourc
 		stat.Stat = string(vmv1.Creating)
 		return nil
 	}
+	if err != nil {
+		klog.Errorf("create stack failed:%v", err)
+	}
 	return err
 }
 
@@ -300,7 +303,7 @@ func (h *Heat) DeleteStack(stat *vmv1.ResourceStatus) error {
 		} else {
 			stat.StackID = ""
 			stat.StackName = ""
-			klog.V(3).Infof("success delete stack")
+			klog.V(2).Infof("success delete stack")
 		}
 	})
 	return nil
@@ -338,12 +341,15 @@ func (h *Heat) updateStack(fpath string, stat *vmv1.ResourceStatus) error {
 		Timeout: heatDoneTimeOut,
 		Tags:    []string{util.StackTag},
 	}
-	rst := stacks.Update(heatcli, stat.StackName, stat.StackID, Opts)
+	rst := stacks.UpdatePatch(heatcli, stat.StackName, stat.StackID, Opts)
 	err = rst.ExtractErr()
 	if err != nil {
 		if _, ok := err.(gophercloud.ErrDefault409); ok {
 			err = nil
 		}
+	}
+	if err != nil {
+		klog.Errorf("update stack failed:%v", err)
 	}
 	return err
 }
