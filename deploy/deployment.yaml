@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vm-controller
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      application: vm-controller
+      component: operator
+  template:
+    metadata:
+      labels:
+        application: vm-controller
+        component: operator
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: application
+                    operator: In
+                    values:
+                      - vm-controller
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - env:
+            - name: OS_PROJECT_NAME
+              valueFrom:
+                secretKeyRef:
+                  key: OS_PROJECT_NAME
+                  name: vm-controller-cloud-admin
+            - name: OS_IDENTITY_API_VERSION
+              value: "3"
+            - name: OS_AUTH_URL
+              valueFrom:
+                secretKeyRef:
+                  key: OS_AUTH_URL
+                  name: vm-controller-cloud-admin
+            - name: OS_REGION_NAME
+              valueFrom:
+                secretKeyRef:
+                  key: OS_REGION_NAME
+                  name: vm-controller-cloud-admin
+            - name: OS_DOMAIN_NAME
+              valueFrom:
+                secretKeyRef:
+                  key: OS_DOMAIN_NAME
+                  name: vm-controller-cloud-admin
+            - name: OS_USER_DOMAIN_NAME
+              valueFrom:
+                secretKeyRef:
+                  key: OS_USER_DOMAIN_NAME
+                  name: vm-controller-cloud-admin
+            - name: OS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  key: OS_USERNAME
+                  name: vm-controller-cloud-admin
+            - name: OS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: OS_PASSWORD
+                  name: vm-controller-cloud-admin
+          image: hub.easystack.io/vm-controller:v2
+          imagePullPolicy: IfNotPresent
+          name: manager
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          args:
+            - -enable-leader-election=true
+            - -net-tpl
+            - /etc/loadbalance.tpl
+            - -vm-tpl
+            - /etc/vm.tpl
+            - -tmp-dir
+            - /tmp
+            - -fip-tpl
+            - /etc/fip.tpl
+            - -v
+            - "2"
+      dnsConfig:
+        options:
+          - name: single-request-reopen
+      dnsPolicy: ClusterFirst
+      nodeSelector:
+        cloud-product: enabled

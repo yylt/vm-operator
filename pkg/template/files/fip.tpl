@@ -5,7 +5,7 @@ resources:
   # floating ip
   #
 {{ if $.publicip.address.ip }}
-  {{ .publicip.name }}:
+  {{ .publicip.name }}-act:
     type: 'OS::Neutron::FloatingIPAssociation'
     properties:
       floatingip_id: {{ .publicip.float_id }}
@@ -13,7 +13,7 @@ resources:
       port_id: {{ .publicip.port_id }}
 
 {{ else }}
-  {{ .publicip.name }}_fipqos:
+  {{ .publicip.name }}-qos:
     type: 'OS::Neutron::QoSPolicy'
   {{ .publicip.name }}_qosbandwidthrule:
     type: 'OS::Neutron::QoSBandwidthLimitRule'
@@ -21,7 +21,7 @@ resources:
       max_kbps: {{ .publicip.Mbps }}
       policy:
         get_resource: {{ .publicip.name }}_fipqos
-  {{ .publicip.name }}:
+  {{ .publicip.name }}-fip:
     type: 'OS::Neutron::FloatingIP'
     properties:
       floating_network: {{ .publicip.subnet.network_id }}

@@ -91,10 +91,9 @@ func (p *Nova) GetAllIps(vm *vmv1.VirtualMachine) []string {
 	}
 	var ips []string
 	for _, v := range vm.Status.Members {
-
 		if v.Ip == "" {
 			// is server in build stat, should wait server ready util ip can fetch
-			// if server is error, will ignore this server
+			// if server is error, ignore this server
 			if v.ResStat == ServerBuildStat {
 				return nil
 			}

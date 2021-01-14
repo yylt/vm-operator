@@ -202,7 +202,7 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 			return nil
 		}
 		sort.Strings(ips)
-		klog.V(3).Infof("fetch nova pool ip:%v", ips)
+		klog.V(2).Infof("update server(nova) ip list:%v", ips)
 		fnova = true
 	} else {
 		// Try find poolmembers ip from link
@@ -216,14 +216,14 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		}
 		k8sres = p.k8smgr.SecondIp(spec.Link)
 		if len(k8sres) == 0 {
-			return fmt.Errorf("k8s pod ip not ready!")
+			klog.V(2).Info("not found ip on link, but still update stack")
 		}
 	}
 	if !fnova {
 		for _, v := range k8sres {
 			ips = append(ips, v.Ip.String())
-			klog.V(3).Infof("fetch k8s pool ip:%v", ips)
 		}
+		klog.V(2).Infof("update pod ip list:%v", ips)
 	}
 	for i, _ := range spec.Ports {
 		spec.Ports[i].Ips = ips
