@@ -6,10 +6,11 @@ import (
 	"fmt"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
-
+	"encoding/binary"
 	"easystack.io/vm-operator/pkg/util"
 	"github.com/tidwall/gjson"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,9 +37,26 @@ type K8sMgr struct {
 	client dynamic.Interface
 }
 
+type Results []*Result
+
 type Result struct {
 	Ip      net.IP
 	PodName string
+}
+
+func (t Results) Len() int {
+	return len(t)
+}
+
+func (t Results) Less(i, j int) bool{
+	inti := binary.BigEndian.Uint32(t[i].Ip.To4())
+	intj := binary.BigEndian.Uint32(t[j].Ip.To4())
+	return inti < intj
+}
+
+func (t Results) Swap(i, j int){
+	t[i].Ip,t[j].Ip=t[j].Ip,t[i].Ip
+	t[i].PodName,t[j].PodName=t[j].PodName,t[i].PodName
 }
 
 type info struct {
@@ -290,6 +308,11 @@ func (p *K8sMgr) SecondIp(link string) []*Result {
 			klog.Errorf("Get kuryr ip failed: %v", err)
 		}
 	}
+	if len(ips)<2{
+		return ips
+	}
+	rsts :=Results(ips)
+	sort.Sort(rsts)
 	return ips
 }
 

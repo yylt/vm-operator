@@ -290,7 +290,7 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	if spec.Link == "" {
 		// Try find {portId,fixip} from loadbalance info
 		lbres := p.Lb.GetResource(vm)
-		if lbres==nil || lbres.Id == "" || lbres.Ip == "" {
+		if lbres == nil || lbres.Id == "" || lbres.Ip == "" {
 			klog.Infof("load balance not ready, can not fetch lb ip, id")
 			return nil
 		}
