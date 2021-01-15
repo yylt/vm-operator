@@ -33,16 +33,16 @@ const (
 
 // VirtualMachineSpec defines the desired state of VirtualMachine
 type VirtualMachineSpec struct {
-	Auth          *AuthSpec         `json:"auth,omitempty"`
+	Auth          *AuthSpec         `json:"auth"`
 	Server        *ServerSpec       `json:"server,omitempty"`
 	LoadBalance   *LoadBalanceSpec  `json:"loadbalance,omitempty"`
-	AssemblyPhase AssemblyPhaseType `json:"assemblyPhase,omitempty"`
+	AssemblyPhase AssemblyPhaseType `json:"assemblyPhase"`
 	Public        *PublicSepc       `json:"publicip,omitempty"`
 }
 
 type AuthSpec struct {
-	ProjectID string `json:"projectID,omitempty"`
-	Token     string `json:"token,omitempty"`
+	ProjectID string `json:"projectID"`
+	Token     string `json:"token"`
 }
 
 type PortMap struct {

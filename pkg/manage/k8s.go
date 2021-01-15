@@ -328,7 +328,7 @@ func ParseLink(link string, res *Resource) error {
 		res.version = links[2]
 		res.namespace = links[4]
 		res.kind = links[5]
-		res.name = links[7]
+		res.name = links[6]
 	} else {
 		return fmt.Errorf("parse failed, there are not 7 or 8 elements")
 	}
