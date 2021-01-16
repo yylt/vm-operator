@@ -42,6 +42,9 @@ spec:
                   type: string
                 token:
                   type: string
+              required:
+              - projectID
+              - token
               type: object
             loadbalance:
               properties:
@@ -206,6 +209,9 @@ spec:
               - replicas
               - subnet
               type: object
+          required:
+          - assemblyPhase
+          - auth
           type: object
         status:
           properties:

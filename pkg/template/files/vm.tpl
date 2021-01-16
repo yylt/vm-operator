@@ -8,7 +8,7 @@ resources:
 {{ range $intindex := intRange .server.replicas }}
 {{ if $.server.boot_volume_id }}
 {{ else }}
-  boot_volume{{ $intindex }}:
+  {{ $.server.name }}-bootv{{ $intindex }}:
     type: OS::Cinder::Volume
     properties:
       size: {{ $.server.boot_volume.volume_size }}
@@ -18,7 +18,7 @@ resources:
 {{ end }}
 
 {{ range $index, $v := $.server.volumes }}
-  node{{ $intindex }}data_volume{{ $index }}:
+  {{ $.server.name }}-datav{{ $intindex }}-{{ $index }}:
     type: OS::Cinder::Volume
     properties:
       size: {{ $v.volume_size }}
@@ -26,7 +26,7 @@ resources:
       availability_zone: {{ $.server.availability_zone }}
 {{ end }}
 
-  port{{ $intindex }}:
+  {{ $.server.name }}-port{{ $intindex }}:
     type: 'OS::Neutron::Port'
     properties:
       network: {{ $.server.subnet.network_name }}

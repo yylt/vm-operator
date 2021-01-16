@@ -31,6 +31,7 @@ type VmResult struct {
 func (s *VmResult) DeepCopy() *VmResult {
 	tmp := &VmResult{
 		Ip4addres: make(map[string]string),
+		Addresses: make(map[string][]servers.Address),
 	}
 	tmp.Id = s.Id
 	tmp.Name = s.Name
@@ -40,9 +41,9 @@ func (s *VmResult) DeepCopy() *VmResult {
 	}
 
 	for k, v := range s.Addresses {
-		var sas []servers.Address
-		copy(sas,v)
-		tmp.Addresses[k] =sas
+		var sas = make([]servers.Address, len(v))
+		copy(sas, v)
+		tmp.Addresses[k] = sas
 	}
 	return tmp
 }
@@ -90,10 +91,9 @@ func (p *Nova) GetAllIps(vm *vmv1.VirtualMachine) []string {
 	}
 	var ips []string
 	for _, v := range vm.Status.Members {
-
 		if v.Ip == "" {
 			// is server in build stat, should wait server ready util ip can fetch
-			// if server is error, will ignore this server
+			// if server is error, ignore this server
 			if v.ResStat == ServerBuildStat {
 				return nil
 			}

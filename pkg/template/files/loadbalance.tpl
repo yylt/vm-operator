@@ -8,7 +8,7 @@ resources:
   lb:
     type: 'OS::Neutron::LBaaS::LoadBalancer'
     properties:
-      name: {{ .loadbalance.name }}
+      name: {{ $.loadbalance.name }}
       vip_subnet: {{ .loadbalance.subnet.subnet_id }}
 {{ if .loadbalance.loadbalance_ip }}
       vip_address: {{ .loadbalance.loadbalance_ip }}
@@ -16,7 +16,7 @@ resources:
 
 {{ range $index, $v := $.loadbalance.port_map }}
 
-  lbpool{{ $index }}:
+  {{ $.loadbalance.name }}-pool{{ $index }}:
     type: 'OS::Neutron::LBaaS::Pool'
     depends_on: listener{{ $index }}
     properties:
@@ -24,7 +24,7 @@ resources:
       protocol: {{ $v.protocol }}
       listener: {get_resource: listener{{ $index }}}
 
-  listener{{ $index }}:
+  {{ $.loadbalance.name }}-listen{{ $index }}:
     type: 'OS::Neutron::LBaaS::Listener'
     depends_on: lb
     properties:
@@ -34,7 +34,7 @@ resources:
       connection_limit: -1
 
 {{ range $ipindex, $ip := $v.ips }}
-  lbmember{{ $ipindex }}:
+  {{ $.loadbalance.name }}-member{{ $ipindex }}:
     type: 'OS::Neutron::LBaaS::PoolMember'
     depends_on: lbpool{{ $index }}
     properties:

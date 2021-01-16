@@ -267,7 +267,7 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	defer func() {
 		//Remove stack if pod link not exist
 		if removeRes {
-			klog.V(2).Infof("remove loadbalance resource")
+			klog.V(2).Infof("remove publicip resource")
 			if nsname != "" {
 				p.portop.rm(nsname)
 			}
@@ -290,7 +290,7 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	if spec.Link == "" {
 		// Try find {portId,fixip} from loadbalance info
 		lbres := p.Lb.GetResource(vm)
-		if lbres==nil || lbres.Id == "" || lbres.Ip == "" {
+		if lbres == nil || lbres.Id == "" || lbres.Ip == "" {
 			klog.Infof("load balance not ready, can not fetch lb ip, id")
 			return nil
 		}
