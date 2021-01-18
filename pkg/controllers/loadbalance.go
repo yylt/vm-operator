@@ -208,15 +208,11 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		// Try find poolmembers ip from link
 		if !p.k8smgr.LinkIsExist(spec.Link) {
 			lbip := net.ParseIP(spec.LbIp)
-			portmaps := make(map[int32]string)
-			for _, po := range spec.Ports {
-				portmaps[po.Port] = po.Protocol
-			}
-			p.k8smgr.AddLinks(spec.Link, lbip, portmaps)
+			p.k8smgr.AddLinks(spec.Link, lbip, spec.Ports)
 		}
 		k8sres = p.k8smgr.SecondIp(spec.Link)
 		if len(k8sres) == 0 {
-			if stat==nil{
+			if stat == nil {
 				klog.V(2).Info("not found ip on link and no stack found, skip")
 				return nil
 			}
@@ -235,7 +231,7 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	var resname string
 
 	if stat == nil || stat.StackName == "" {
-		resname = fmt.Sprintf("%s-%s", spec.Name, util.RandStr(5))
+		resname = fmt.Sprintf("%s-%s", vm.Name, util.RandStr(5))
 		vm.Status.NetStatus = &vmv1.ResourceStatus{
 			StackName: resname,
 		}

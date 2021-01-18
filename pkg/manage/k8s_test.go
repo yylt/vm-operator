@@ -1,9 +1,9 @@
 package manage
 
 import (
+	"net"
 	"sort"
 	"testing"
-	"net"
 )
 
 func TestSortResources(t *testing.T) {
@@ -25,13 +25,13 @@ func TestSortResources(t *testing.T) {
 			PodName: "pod3",
 		},
 	})
-	for i,v:=range rest{
-		t.Logf("index %d, data:%v",i,v)
+	for i, v := range rest {
+		t.Logf("index %d, data:%v", i, v)
 	}
 	sort.Sort(rest)
 	t.Log("after sort")
-	for i,v:=range rest{
-		t.Logf("index %d, data:%v",i,v)
+	for i, v := range rest {
+		t.Logf("index %d, data:%v", i, v)
 	}
 
 }

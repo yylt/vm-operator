@@ -32,7 +32,7 @@ func TestRenderByName(t *testing.T) {
 		vmv1.VirtualMachineSpec{
 			Auth: &vmv1.AuthSpec{},
 			Server: &vmv1.ServerSpec{
-				Replicas:   2,
+				Replicas:   1,
 				Name:       "abc",
 				BootImage:  "a.iso",
 				BootVolume: volume,

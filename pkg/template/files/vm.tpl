@@ -5,7 +5,7 @@ resources:
   # vitual machines
   #
 
-{{ range $intindex := intRange .server.replicas }}
+{{ range $intindex := intRange $.server.replicas }}
 {{ if $.server.boot_volume_id }}
 {{ else }}
   {{ $.server.name }}-bootv{{ $intindex }}:
