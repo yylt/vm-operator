@@ -4,15 +4,18 @@ import (
 	goctx "context"
 	"encoding/json"
 	"fmt"
-	apierrs "k8s.io/apimachinery/pkg/api/errors"
+
+	"encoding/binary"
 	"net"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-	"encoding/binary"
+
+	vmv1 "easystack.io/vm-operator/pkg/api/v1"
 	"easystack.io/vm-operator/pkg/util"
 	"github.com/tidwall/gjson"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -48,15 +51,15 @@ func (t Results) Len() int {
 	return len(t)
 }
 
-func (t Results) Less(i, j int) bool{
+func (t Results) Less(i, j int) bool {
 	inti := binary.BigEndian.Uint32(t[i].Ip.To4())
 	intj := binary.BigEndian.Uint32(t[j].Ip.To4())
 	return inti < intj
 }
 
-func (t Results) Swap(i, j int){
-	t[i].Ip,t[j].Ip=t[j].Ip,t[i].Ip
-	t[i].PodName,t[j].PodName=t[j].PodName,t[i].PodName
+func (t Results) Swap(i, j int) {
+	t[i].Ip, t[j].Ip = t[j].Ip, t[i].Ip
+	t[i].PodName, t[j].PodName = t[j].PodName, t[i].PodName
 }
 
 type info struct {
@@ -67,7 +70,7 @@ type info struct {
 	// can be nil
 	lbip     net.IP
 	isdelete bool
-	portmap  map[int32]string // should add
+	portmap  []*vmv1.PortMap
 	hashid   int64
 	link     string
 }
@@ -115,9 +118,12 @@ func (p *K8sMgr) hashinfo(val *info) int64 {
 	}
 	buf.WriteString(val.lbip.String())
 	buf.WriteString(val.link)
-	for port, pt := range val.portmap {
-		buf.WriteString(fmt.Sprintf("%d", port))
-		buf.WriteString(pt)
+	if len(val.portmap) == 0 {
+		return util.Hashid(buf.Bytes())
+	}
+	for _, val := range val.portmap {
+		buf.WriteString(fmt.Sprintf("%d", val.Port))
+		buf.WriteString(fmt.Sprintf("%d", val.PodPort))
 	}
 
 	return util.Hashid(buf.Bytes())
@@ -138,14 +144,14 @@ func (p *K8sMgr) loop(timed time.Duration, getlbfn func(link string) net.IP) {
 					val.lbip = getlbfn(link)
 				}
 				if val.lbip == nil {
-					klog.Infof("load balance ip not found, link:%v", val.link)
+					klog.Infof("not found load balance ip on link:%v", val.link)
 					continue
 				}
 				hashid := p.hashinfo(val)
 				if val.hashid == hashid {
 					continue
 				}
-				klog.V(4).Infof("start sync k8s service, link:%v", val.link)
+				klog.V(4).Infof("start sync k8s service on link:%v", val.link)
 
 				err = p.updateService(val.lbip, val)
 				if err != nil {
@@ -155,7 +161,7 @@ func (p *K8sMgr) loop(timed time.Duration, getlbfn func(link string) net.IP) {
 					delete(p.lbinfo, link)
 				}
 				val.hashid = hashid
-				klog.V(4).Infof("sync k8s service done, delete:%v, link:%v", val.isdelete, val.link)
+				klog.V(4).Infof("sync service done, delete:%v, link:%v", val.isdelete, val.link)
 			}
 			p.mu.RUnlock()
 		}
@@ -237,24 +243,27 @@ func (p *K8sMgr) DelLinks(links ...string) {
 	}
 }
 
-func (p *K8sMgr) AddLinks(link string, lbip net.IP, portmap map[int32]string) {
-	if link == "" {
+func (p *K8sMgr) AddLinks(link string, lbip net.IP, portmap []*vmv1.PortMap) {
+	if link == "" || len(portmap) == 0 {
+		klog.Info("add link failed, not found portmap or link")
 		return
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	var newpm = make([]*vmv1.PortMap, len(portmap))
+	for i, v := range portmap {
+		newpm[i] = v.DeepCopy()
+	}
+
 	klog.Infof("link add lbip:%v, link:%v", lbip, link)
 	if val, ok := p.lbinfo[link]; ok {
-		val.link = link
-		for k, _ := range val.portmap {
-			delete(val.portmap, k)
-		}
-		val.portmap = portmap
+		val.portmap = val.portmap[:0]
+		val.portmap = newpm
 	} else {
 		p.lbinfo[link] = &info{
-			portmap: portmap,
+			portmap: newpm,
 			link:    link,
 			lbip:    lbip,
 			existip: lbip != nil,
@@ -308,10 +317,10 @@ func (p *K8sMgr) SecondIp(link string) []*Result {
 			klog.Errorf("Get kuryr ip failed: %v", err)
 		}
 	}
-	if len(ips)<2{
+	if len(ips) < 2 {
 		return ips
 	}
-	rsts :=Results(ips)
+	rsts := Results(ips)
 	sort.Sort(rsts)
 	return ips
 }
@@ -334,22 +343,28 @@ func ParseLink(link string, res *Resource) error {
 	}
 	// link example: /apis/apps/v1/namespaces/test/deployments/pause
 	// 		/api/v1/namespaces/default/pods/nginx-xs89a
-	res.svcname = fmt.Sprintf("%s-%s", res.namespace, res.name)
+	res.svcname = fmt.Sprintf("%s-%s", res.name, util.RandStr(5))
 	return nil
 }
 
-func serviceExternalUnstract(labels map[string]string, namespace, name, lbip string, portmap map[int32]string) *unstructured.Unstructured {
+func serviceExternalUnstract(labels map[string]string, namespace, name, lbip string, portmap []*vmv1.PortMap) *unstructured.Unstructured {
 	var (
-		ports []map[string]interface{}
+		ports   []map[string]interface{}
+		proto   string
+		podport int32
 	)
-	for port, proto := range portmap {
-		if proto != "UDP" && proto != "TCP" {
+	for _, val := range portmap {
+		if val.Protocol != "UDP" && val.Protocol != "TCP" {
 			proto = "TCP"
+		}
+		podport = val.PodPort
+		if podport == 0 {
+			podport = val.Port
 		}
 		ports = append(ports, map[string]interface{}{
 			"protocol":   proto,
-			"port":       port,
-			"targetPort": port,
+			"port":       val.Port,
+			"targetPort": podport,
 		})
 	}
 

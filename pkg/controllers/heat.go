@@ -112,6 +112,10 @@ func (h *Heat) update(stat *vmv1.ResourceStatus) error {
 	v = h.stacks[stat.StackID]
 	stat.Stat = getStackStat(v)
 	if stat.Stat == Failed {
+		if v.StatusReason == "" {
+			klog.Info("stack status failed, but no reason")
+			return nil
+		}
 		return fmt.Errorf(v.StatusReason)
 	}
 	return nil

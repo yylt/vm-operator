@@ -80,7 +80,7 @@ func (p *port) addPortStore(page pagination.Page) {
 	for _, port := range lists {
 		v, ok := p.ports[port.Name]
 		if ok {
-			klog.V(2).Infof("callback update port stat:%v", port)
+			klog.V(3).Infof("callback update port stat:%v", port)
 			v.DeepCopyFrom(&port)
 		}
 	}
@@ -291,7 +291,7 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		// Try find {portId,fixip} from loadbalance info
 		lbres := p.Lb.GetResource(vm)
 		if lbres == nil || lbres.Id == "" || lbres.Ip == "" {
-			klog.Infof("load balance not ready, can not fetch lb ip, id")
+			klog.Infof("not found load balance ip and portid")
 			return nil
 		}
 		klog.V(3).Infof("fetch load balance ip:%s,id:%v", lbres.Ip, lbres.Id)

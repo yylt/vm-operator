@@ -102,12 +102,26 @@ func toChar(v interface{}) string {
 }
 
 //intRange
-func intRange(end int64) []int64 {
+func intRange(end interface{}) []int32 {
 	var i int64
-	n := end
-	result := make([]int64, n)
-	for i = 0; i < n; i++ {
-		result[i] = i
+	switch v := end.(type) {
+	case string:
+		return nil
+	case []byte:
+		return nil
+	case int:
+		i = int64(v)
+	case int32:
+		i = int64(v)
+	case int64:
+		i = int64(v)
+	default:
+		return nil
+	}
+
+	result := make([]int32, i)
+	for k := 0; int64(k) < i; k++ {
+		result[k] = int32(k)
 	}
 	return result
 }

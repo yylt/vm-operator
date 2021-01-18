@@ -17,7 +17,7 @@ test: generate fmt vet manifests
 	go test ./... -coverprofile cover.out
 
 # Build manager binary
-build: copy
+build: fmt vet copy
 	go build -o bin/manager main.go
 
 copy:
