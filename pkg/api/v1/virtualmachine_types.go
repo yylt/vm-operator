@@ -48,6 +48,7 @@ type AuthSpec struct {
 type PortMap struct {
 	Ips      []string `json:"ips,omitempty"`
 	Port     int32    `json:"port"`
+	PodPort     int32    `json:"pod_port,omitempty"` //default same with port
 	Protocol string   `json:"protocol"`
 }
 

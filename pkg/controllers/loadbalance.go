@@ -216,6 +216,10 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		}
 		k8sres = p.k8smgr.SecondIp(spec.Link)
 		if len(k8sres) == 0 {
+			if stat==nil{
+				klog.V(2).Info("not found ip on link and no stack found, skip")
+				return nil
+			}
 			klog.V(2).Info("not found ip on link, but still update stack")
 		}
 	}

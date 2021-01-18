@@ -62,8 +62,23 @@ func TestRenderByName(t *testing.T) {
 					},
 				},
 			},
-
 			AssemblyPhase: "",
+		},
+		vmv1.VirtualMachineSpec{
+			LoadBalance: &vmv1.LoadBalanceSpec{
+				Subnet: &vmv1.SubnetSpec{
+					SubnetId: "default",
+				},
+				LbIp: "1.1.1.1",
+				Name: "net",
+				Ports: []*vmv1.PortMap{
+					&vmv1.PortMap{
+						Ips:      []string{},
+						Port:     0,
+						Protocol: "TCP",
+					},
+				},
+			},
 		},
 	}
 	for _, v := range paramlist {

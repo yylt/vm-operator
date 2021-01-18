@@ -61,6 +61,9 @@ spec:
                         items:
                           type: string
                         type: array
+                      pod_port:
+                        format: int32
+                        type: integer
                       port:
                         format: int32
                         type: integer
