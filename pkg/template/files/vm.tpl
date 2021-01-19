@@ -57,20 +57,20 @@ resources:
 {{ end }}
       networks:
         - port:
-            get_resource: port{{ $intindex }}
+            get_resource: {{ $.server.name }}-port{{ $intindex }}
       availability_zone: {{ $.server.availability_zone }}
       block_device_mapping_v2:
         - boot_index: 0
 {{ if $.server.boot_volume_id }}
           volume_id: {{ $.server.boot_volume_id }}
 {{ else }}
-          volume_id: {get_resource: boot_volume{{ $intindex }}}
+          volume_id: {get_resource: {{ $.server.name }}-bootv{{ $intindex }}}
           delete_on_termination: {{ $.server.boot_volume.volume_delete }}
 {{ end }}
 
 {{ range $index, $v := $.server.volumes }}
         - boot_index: {{ add 1 $index }}
-          volume_id: {get_resource: node{{ $intindex }}data_volume{{ $index }}}
+          volume_id: {get_resource: {{ $.server.name }}-datav{{ $intindex }}-{{ $index }}}
           delete_on_termination: {{ $v.volume_delete }}
 {{ end }}
 

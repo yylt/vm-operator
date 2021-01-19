@@ -226,7 +226,7 @@ func (p *Nova) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	}
 	// 1. prefixName used as filter prefix key
 	// 2. rand string to dict same name
-	resname := fmt.Sprintf("%s-%s", spec.Name, util.RandStr(5))
+	resname := fmt.Sprintf("%s-%s", vm.Name, util.RandStr(5))
 	if stat == nil || stat.StackName == "" {
 		vm.Status.VmStatus = &vmv1.ResourceStatus{
 			StackName: resname,

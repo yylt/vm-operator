@@ -18,11 +18,11 @@ resources:
 {{ if $v.ips }}
   {{ $.loadbalance.name }}-pool{{ $index }}:
     type: 'OS::Neutron::LBaaS::Pool'
-    depends_on: listener{{ $index }}
+    depends_on: {{ $.loadbalance.name }}-listen{{ $index }}
     properties:
       lb_algorithm: ROUND_ROBIN
       protocol: {{ $v.protocol }}
-      listener: {get_resource: listener{{ $index }}}
+      listener: {get_resource: {{ $.loadbalance.name }}-listen{{ $index }} }
 
   {{ $.loadbalance.name }}-listen{{ $index }}:
     type: 'OS::Neutron::LBaaS::Listener'
@@ -36,9 +36,9 @@ resources:
 {{ range $ipindex, $ip := $v.ips }}
   {{ $.loadbalance.name }}-member{{ $ipindex }}:
     type: 'OS::Neutron::LBaaS::PoolMember'
-    depends_on: lbpool{{ $index }}
+    depends_on: {{ $.loadbalance.name }}-pool{{ $index }}
     properties:
-      pool:  {get_resource: lbpool{{ $index }} }
+      pool:  {get_resource: {{ $.loadbalance.name }}-pool{{ $index }} }
       subnet: {{ $.loadbalance.subnet.subnet_id }}
       protocol_port: {{ $v.port }}
       weight: 1
