@@ -1,7 +1,9 @@
 package controllers
 
 import (
+	"easystack.io/vm-operator/pkg/template"
 	"fmt"
+	"github.com/tidwall/gjson"
 	"net"
 	"sort"
 	"sync"
@@ -65,6 +67,7 @@ func NewLoadBalance(heat *Heat, mgr *manage.OpenMgr, k8smgr *manage.K8sMgr, nova
 		linkname: make(map[int64]string),
 	}
 	mgr.Regist(manage.Lb, lb.addLbStore)
+	heat.RegistReOrderFunc(template.Lb, reorderSpec)
 	return lb
 }
 
@@ -247,19 +250,135 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	return nil
 }
 
+// NOTE: on reduce situation, we should also ensure index is same with older
+//
+// such as listen0 (90 and tcp) is miss, and listen1 (80 and udp) is on
+// after render, listen0 is disappeard, and listen1 also is (80 and udp)
+
+// less -> much
+// much -> less
+func reorderSpec(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) {
+	if stat == nil || stat.Template == "" || len(spec.LoadBalance.Ports) == 0 {
+		return
+	}
+	var (
+		oldips     []string
+		currentips = map[string]struct{}{}
+
+		oldlis     []*vmv1.PortMap
+		currentlis = map[string]*vmv1.PortMap{}
+	)
+
+	for _, pm := range spec.LoadBalance.Ports {
+		if len(currentips) == 0 {
+			for _, addr := range pm.Ips {
+				currentips[addr] = struct{}{}
+			}
+		}
+
+		liskey := portMapHashKey(pm)
+		currentlis[liskey] = pm.DeepCopy()
+		break
+	}
+	//fix members
+	template.FindLbMembers([]byte(stat.Template), spec.LoadBalance.Name, func(value *gjson.Result) {
+		if value.IsObject() {
+			ipaddr := value.Get("address").String()
+			oldips = append(oldips, ipaddr)
+		}
+	})
+	if len(oldips) == 0 || len(currentips) == 0 {
+		return
+	}
+	klog.V(2).Info("members old order: ", oldips)
+	newips := orderMembers(oldips, currentips)
+	klog.V(2).Info("members new order: ", newips)
+
+	//fix listens.
+	template.FindLbListens([]byte(stat.Template), spec.LoadBalance.Name, func(value *gjson.Result) {
+		if value.IsObject() {
+			proto := value.Get("protocol").String()
+			port := value.Get("protocol_port").Int()
+			liskey := &vmv1.PortMap{
+				Protocol: proto,
+				Port:     int32(port),
+			}
+			oldlis = append(oldlis, liskey)
+		}
+	})
+
+	newportmaps := orderListens(oldlis, currentlis, newips)
+	spec.LoadBalance.Ports = newportmaps
+	return
+}
+
+func orderListens(src []*vmv1.PortMap, dst map[string]*vmv1.PortMap, ips []string) (ss []*vmv1.PortMap) {
+	var (
+		srcmap = make(map[string]*vmv1.PortMap)
+	)
+	for _, v := range src {
+		key := portMapHashKey(v)
+		srcmap[key] = v
+	}
+	for _, srcv := range src {
+		key := portMapHashKey(srcv)
+		newpm := srcv.DeepCopy()
+		if _, ok := dst[key]; ok {
+			newpm.Ips = ips
+		} else {
+			newpm.Ips = nil
+		}
+		ss = append(ss, newpm)
+	}
+	//TODO dst value is reused
+	for dstk, dv := range dst {
+		if _, ok := srcmap[dstk]; !ok {
+			dv.Ips = ips
+			ss = append(ss, dv)
+		}
+	}
+	return
+}
+
+func orderMembers(src []string, dst map[string]struct{}) (ss []string) {
+	var (
+		srcmap = make(map[string]struct{})
+	)
+	for _, v := range src {
+		srcmap[v] = struct{}{}
+	}
+	for _, srck := range src {
+		if _, ok := dst[srck]; ok {
+			ss = append(ss, srck)
+		} else {
+			ss = append(ss, "")
+		}
+	}
+	for dstk, _ := range dst {
+		if _, ok := srcmap[dstk]; !ok {
+			ss = append(ss, dstk)
+		}
+	}
+	return
+}
+
 func validLbSpec(spec *vmv1.LoadBalanceSpec) error {
 	if len(spec.Ports) == 0 {
 		return fmt.Errorf("not found port-protocol list info")
 	}
 	for _, port := range spec.Ports {
-		if port.Port > 65535 {
-			return fmt.Errorf("port should be less than 65535")
+		if port.Port > 65535 || port.Port <= 0 {
+			return fmt.Errorf("port should be less than 65535 and bigger than 0")
 		}
 	}
 	if spec.LbIp != "" {
 		if net.ParseIP(spec.LbIp) == nil {
-			return fmt.Errorf("loadbalance ip(%v) can not parse", spec.LbIp)
+			return fmt.Errorf("parse lb ip(%v) faild", spec.LbIp)
 		}
 	}
 	return nil
+}
+
+func portMapHashKey(v *vmv1.PortMap) string {
+	return fmt.Sprintf("%s%d", v.Protocol, v.Port)
 }

@@ -3,6 +3,7 @@ package template
 import (
 	"fmt"
 	"io/ioutil"
+	"strings"
 	"text/template"
 
 	"easystack.io/vm-operator/pkg/util"
@@ -157,4 +158,45 @@ func Parse(result gjson.Result) interface{} {
 	default:
 		return ""
 	}
+}
+
+// TODO(y) code below actually depend on files/*.tpl
+// update tpl need update here code, also on reversed.
+
+func FindLbMembers(jsonbs []byte, lbname string, fn func(property *gjson.Result)) {
+	result := gjson.Get(string(jsonbs), "resources")
+	buf := util.GetBuf()
+
+	buf.WriteString(lbname)
+	buf.WriteString("-member")
+
+	if result.IsObject() {
+		result.ForEach(func(key, value gjson.Result) bool {
+			if strings.HasPrefix(key.String(), buf.String()) {
+				result := value.Get("properties")
+				fn(&result)
+			}
+			return true
+		})
+	}
+	util.PutBuf(buf)
+}
+
+func FindLbListens(jsonbs []byte, lbname string, fn func(property *gjson.Result)) {
+	result := gjson.Get(string(jsonbs), "resources")
+	buf := util.GetBuf()
+
+	buf.WriteString(lbname)
+	buf.WriteString("-listen")
+
+	if result.IsObject() {
+		result.ForEach(func(key, value gjson.Result) bool {
+			if strings.HasPrefix(key.String(), buf.String()) {
+				result := value.Get("properties")
+				fn(&result)
+			}
+			return true
+		})
+	}
+	util.PutBuf(buf)
 }
