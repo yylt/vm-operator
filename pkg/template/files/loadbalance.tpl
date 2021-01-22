@@ -34,7 +34,9 @@ resources:
       connection_limit: -1
 
 {{ range $ipindex, $ip := $v.ips }}
-  {{ $.loadbalance.name }}-member{{ $ipindex }}:
+
+{{ if $ip }}
+  {{ $.loadbalance.name }}-member{{ $index }}-{{ $ipindex }}:
     type: 'OS::Neutron::LBaaS::PoolMember'
     depends_on: {{ $.loadbalance.name }}-pool{{ $index }}
     properties:
@@ -43,6 +45,8 @@ resources:
       protocol_port: {{ $v.port }}
       weight: 1
       address: {{ $ip }}
+{{ end }}
+
 {{ end }}
 {{ end }}
 {{ end }}

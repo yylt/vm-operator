@@ -2,6 +2,7 @@ package template
 
 import (
 	"encoding/json"
+	"sigs.k8s.io/yaml"
 	"testing"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
@@ -56,8 +57,8 @@ func TestRenderByName(t *testing.T) {
 				Name: "net",
 				Ports: []*vmv1.PortMap{
 					&vmv1.PortMap{
-						Ips:      []string{"1.2.3.4", "1.1.1.1"},
-						Port:     0,
+						Ips:      []string{"", "1.1.1.1"},
+						Port:     20,
 						Protocol: "TCP",
 					},
 				},
@@ -69,12 +70,16 @@ func TestRenderByName(t *testing.T) {
 				Subnet: &vmv1.SubnetSpec{
 					SubnetId: "default",
 				},
-				LbIp: "1.1.1.1",
 				Name: "net",
 				Ports: []*vmv1.PortMap{
 					&vmv1.PortMap{
-						Ips:      []string{},
-						Port:     0,
+						Ips:      []string{"", "1.1.1.1"},
+						Port:     10,
+						Protocol: "TCP",
+					},
+					&vmv1.PortMap{
+						Ips:      []string{"2.2.2.2"},
+						Port:     20,
 						Protocol: "TCP",
 					},
 				},
@@ -90,6 +95,28 @@ func TestRenderByName(t *testing.T) {
 		bs, err = engine.RenderByName(Vm, params)
 		t.Logf("vm: %s err:%s", bs, err)
 		bs, err = engine.RenderByName(Lb, params)
+
+		jsonbs, err := yaml.YAMLToJSON(bs)
+		if err != nil {
+			//panic(err)
+			t.Log("YAMLToJSON failed:", err)
+		}
 		t.Logf("net: %s err:%s", bs, err)
+
+		FindLbMembers(jsonbs, "net", func(value *gjson.Result) {
+			if value.IsObject() {
+				ipaddr := value.Get("address").String()
+				t.Log("find address:", ipaddr)
+			}
+		})
+
+		FindLbListens(jsonbs, "net", func(value *gjson.Result) {
+			if value.IsObject() {
+				proto := value.Get("protocol").String()
+				port := value.Get("protocol_port").Int()
+				t.Log("find proto:", proto, "find port:", port)
+			}
+		})
+
 	}
 }

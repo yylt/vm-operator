@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"sigs.k8s.io/yaml"
 	"sync"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
@@ -19,6 +18,7 @@ import (
 	"github.com/gophercloud/gophercloud/pagination"
 	"github.com/tidwall/gjson"
 	klog "k8s.io/klog/v2"
+	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -42,6 +42,8 @@ type StackResult struct {
 	Status       string `json:"stack_status"`
 	StatusReason string `json:"stack_status_reason"`
 }
+
+type Reorderfn func(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus)
 
 func (s *StackResult) DeepCopyFrom(ls *stacks.ListedStack) {
 	s.ID = ls.ID
@@ -76,6 +78,10 @@ type Heat struct {
 
 	tmpdir   string
 	endpoint string
+
+	// when stack update, resources must append
+	// if the position of resources exchange will update failed
+	reorderfuncs map[template.Kind]Reorderfn
 }
 
 func NewHeat(engine *template.Template, tmpdir string, opmgr *manage.OpenMgr) *Heat {
@@ -84,12 +90,13 @@ func NewHeat(engine *template.Template, tmpdir string, opmgr *manage.OpenMgr) *H
 		panic(err)
 	}
 	ht := &Heat{
-		mu:       sync.RWMutex{},
-		engine:   engine,
-		opmgr:    opmgr,
-		tmpdir:   tmpdir,
-		endpoint: opt.IdentityEndpoint,
-		stacks:   make(map[string]*StackResult),
+		mu:           sync.RWMutex{},
+		engine:       engine,
+		opmgr:        opmgr,
+		tmpdir:       tmpdir,
+		endpoint:     opt.IdentityEndpoint,
+		stacks:       make(map[string]*StackResult),
+		reorderfuncs: make(map[template.Kind]Reorderfn),
 	}
 
 	opmgr.Regist(manage.Heat, ht.addStore)
@@ -137,6 +144,18 @@ func (h *Heat) addStore(page pagination.Page) {
 		}
 	}
 	return
+}
+
+// init only in beginning, so do not need mutex
+func (h *Heat) RegistReOrderFunc(kind template.Kind, fn Reorderfn) {
+	_, ok := h.reorderfuncs[kind]
+	if ok {
+		klog.Infof("update reorder func on kind %s", kind)
+		h.reorderfuncs[kind] = fn
+		return
+	}
+	klog.Infof("add reorder func on kind %s", kind)
+	h.reorderfuncs[kind] = fn
 }
 
 // the stat on vm must not be nil
@@ -202,6 +221,12 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) error {
 // generate template file
 // 1. update stat.Template if hashid not equal
 func (h *Heat) generateTmpFile(tpl template.Kind, spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) (fpath string, hashid int64, reterr error) {
+	// update spec by template
+	fn, ok := h.reorderfuncs[tpl]
+	if ok {
+		fn(spec, stat)
+	}
+
 	data, reterr := json.Marshal(spec)
 	if reterr != nil {
 		return

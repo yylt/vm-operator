@@ -28,6 +28,8 @@ type K8Res int
 
 const (
 	Pod K8Res = iota
+
+	network_status = "k8s.v1.cni.cncf.io/networks-status"
 )
 
 // 1. Sync service which externalIPs is lb ip
@@ -386,15 +388,32 @@ func serviceExternalUnstract(labels map[string]string, namespace, name, lbip str
 
 }
 
+/*
+example:
+   k8s.v1.cni.cncf.io/networks-status: |-
+     [{
+         "name": "kuryr",
+         "interface": "eth0",
+         "ips": [
+             "10.0.0.98"
+         ],
+         "mac": "fa:16:3e:e5:24:d7",
+         "dns": {
+             "nameservers": [
+                 "8.8.8.8"
+             ]
+         }
+     }]
+*/
 func kuryrIps(object *unstructured.Unstructured, fn func(string, net.IP)) error {
 
-	networks, found, err := unstructured.NestedString(object.Object, "metadata", "annotations", "k8s.v1.cni.cncf.io/networks-status")
+	networks, found, err := unstructured.NestedString(object.Object, "metadata", "annotations", network_status)
 	if err != nil || !found {
-		return fmt.Errorf("Not found networks-status in annotations")
+		return fmt.Errorf("not found %s in annotations", network_status)
 	}
 	jsondata := gjson.Parse(networks)
 	if !jsondata.IsArray() {
-		return fmt.Errorf("Networks-status in annotations is not list")
+		return fmt.Errorf("%s in annotations type is %s, except array", network_status, jsondata.Type)
 	}
 
 	jsondata.ForEach(func(_, value gjson.Result) bool {
