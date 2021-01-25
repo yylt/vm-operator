@@ -211,7 +211,7 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		// Try find poolmembers ip from link
 		if !p.k8smgr.LinkIsExist(spec.Link) {
 			lbip := net.ParseIP(spec.LbIp)
-			p.k8smgr.AddLinks(spec.Link, lbip, spec.Ports)
+			p.k8smgr.AddLinks(spec.Link, lbip, spec.Ports, spec.UseService)
 		}
 		k8sres = p.k8smgr.SecondIp(spec.Link)
 		if len(k8sres) == 0 {
@@ -374,6 +374,11 @@ func validLbSpec(spec *vmv1.LoadBalanceSpec) error {
 	if spec.LbIp != "" {
 		if net.ParseIP(spec.LbIp) == nil {
 			return fmt.Errorf("parse lb ip(%v) faild", spec.LbIp)
+		}
+	}
+	for i, v := range spec.Ports {
+		if v.PodPort == 0 {
+			spec.Ports[i].PodPort = v.Port
 		}
 	}
 	return nil

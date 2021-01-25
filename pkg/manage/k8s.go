@@ -69,6 +69,10 @@ type info struct {
 	// if ip not exist, getlbfn will try fetch lbip
 	existip bool
 
+	// use server or not
+	// create and sync service
+	isservice bool
+
 	// can be nil
 	lbip     net.IP
 	isdelete bool
@@ -142,6 +146,9 @@ func (p *K8sMgr) loop(timed time.Duration, getlbfn func(link string) net.IP) {
 		case <-time.NewTimer(timed).C:
 			p.mu.RLock()
 			for link, val := range p.lbinfo {
+				if !val.isservice {
+					continue
+				}
 				if !val.existip {
 					val.lbip = getlbfn(link)
 				}
@@ -245,7 +252,7 @@ func (p *K8sMgr) DelLinks(links ...string) {
 	}
 }
 
-func (p *K8sMgr) AddLinks(link string, lbip net.IP, portmap []*vmv1.PortMap) {
+func (p *K8sMgr) AddLinks(link string, lbip net.IP, portmap []*vmv1.PortMap, useservcie bool) {
 	if link == "" || len(portmap) == 0 {
 		klog.Info("add link failed, not found portmap or link")
 		return
@@ -265,10 +272,11 @@ func (p *K8sMgr) AddLinks(link string, lbip net.IP, portmap []*vmv1.PortMap) {
 		val.portmap = newpm
 	} else {
 		p.lbinfo[link] = &info{
-			portmap: newpm,
-			link:    link,
-			lbip:    lbip,
-			existip: lbip != nil,
+			portmap:   newpm,
+			link:      link,
+			lbip:      lbip,
+			existip:   lbip != nil,
+			isservice: useservcie,
 		}
 	}
 }

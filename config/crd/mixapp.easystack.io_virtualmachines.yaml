@@ -90,6 +90,8 @@ spec:
                   - subnet_id
                   - subnet_name
                   type: object
+                use_service:
+                  type: boolean
               required:
               - name
               - subnet
