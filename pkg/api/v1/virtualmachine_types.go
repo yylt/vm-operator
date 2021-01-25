@@ -83,11 +83,12 @@ type ServerSpec struct {
 }
 
 type LoadBalanceSpec struct {
-	Subnet *SubnetSpec `json:"subnet"`
-	Ports  []*PortMap  `json:"port_map,omitempty"`
-	Name   string      `json:"name"`
-	LbIp   string      `json:"loadbalance_ip,omitempty"`
-	Link   string      `json:"link,omitempty"`
+	Subnet     *SubnetSpec `json:"subnet"`
+	Ports      []*PortMap  `json:"port_map,omitempty"`
+	Name       string      `json:"name"`
+	LbIp       string      `json:"loadbalance_ip,omitempty"`
+	Link       string      `json:"link,omitempty"`
+	UseService bool        `json:"use_service,omitempty"`
 }
 
 type PublicSepc struct {

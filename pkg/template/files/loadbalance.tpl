@@ -42,7 +42,11 @@ resources:
     properties:
       pool:  {get_resource: {{ $.loadbalance.name }}-pool{{ $index }} }
       subnet: {{ $.loadbalance.subnet.subnet_id }}
+{{ if $v.use_service }}
       protocol_port: {{ $v.port }}
+{{ else }}
+      protocol_port: {{ $v.pod_port }}
+{{ end }}
       weight: 1
       address: {{ $ip }}
 {{ end }}

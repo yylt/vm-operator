@@ -53,12 +53,14 @@ func TestRenderByName(t *testing.T) {
 				Subnet: &vmv1.SubnetSpec{
 					SubnetId: "default",
 				},
-				LbIp: "1.1.1.1",
-				Name: "net",
+				LbIp:       "1.1.1.1",
+				Name:       "net",
+				UseService: true,
 				Ports: []*vmv1.PortMap{
 					&vmv1.PortMap{
 						Ips:      []string{"", "1.1.1.1"},
 						Port:     20,
+						PodPort:  80,
 						Protocol: "TCP",
 					},
 				},
