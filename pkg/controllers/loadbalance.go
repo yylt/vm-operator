@@ -299,15 +299,21 @@ func reorderSpec(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) {
 		if value.IsObject() {
 			proto := value.Get("protocol").String()
 			port := value.Get("protocol_port").Int()
+			podport := value.Get("pod_port").Int()
+			if podport == 0 {
+				podport = port
+			}
 			liskey := &vmv1.PortMap{
 				Protocol: proto,
 				Port:     int32(port),
+				PodPort:  int32(podport),
 			}
 			oldlis = append(oldlis, liskey)
 		}
 	})
 
 	newportmaps := orderListens(oldlis, currentlis, newips)
+	klog.V(2).Info("portmap new order: ", newportmaps)
 	spec.LoadBalance.Ports = newportmaps
 	return
 }
@@ -385,5 +391,5 @@ func validLbSpec(spec *vmv1.LoadBalanceSpec) error {
 }
 
 func portMapHashKey(v *vmv1.PortMap) string {
-	return fmt.Sprintf("%s%d", v.Protocol, v.Port)
+	return fmt.Sprintf("%s%d%d", v.Protocol, v.Port, v.PodPort)
 }
