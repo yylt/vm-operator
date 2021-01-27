@@ -174,12 +174,14 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		//Remove stack if pod link not exist
 		if removeRes {
 			if vm.Status.NetStatus != nil {
+				klog.V(2).Infof("remove load balance resource")
 				p.heat.DeleteStack(vm.Status.NetStatus)
 				p.mu.Lock()
 				delete(p.lbs, vm.Status.NetStatus.Name)
 				p.mu.Unlock()
 			}
 			if !fnova {
+				klog.V(2).Infof("remove link from k8s manager")
 				p.k8smgr.DelLinks(spec.Link)
 			}
 		} else {
@@ -265,8 +267,7 @@ func reorderSpec(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) {
 		oldips     []string
 		currentips = map[string]struct{}{}
 
-		oldlis     []*vmv1.PortMap
-		currentlis = map[string]*vmv1.PortMap{}
+		newports []*vmv1.PortMap
 	)
 
 	for _, pm := range spec.LoadBalance.Ports {
@@ -275,10 +276,6 @@ func reorderSpec(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) {
 				currentips[addr] = struct{}{}
 			}
 		}
-
-		liskey := portMapHashKey(pm)
-		currentlis[liskey] = pm.DeepCopy()
-		break
 	}
 	//fix members
 	template.FindLbMembers([]byte(stat.Template), spec.LoadBalance.Name, func(value *gjson.Result) {
@@ -294,27 +291,14 @@ func reorderSpec(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) {
 	newips := orderMembers(oldips, currentips)
 	klog.V(2).Info("members new order: ", newips)
 
-	//fix listens.
-	template.FindLbListens([]byte(stat.Template), spec.LoadBalance.Name, func(value *gjson.Result) {
-		if value.IsObject() {
-			proto := value.Get("protocol").String()
-			port := value.Get("protocol_port").Int()
-			podport := value.Get("pod_port").Int()
-			if podport == 0 {
-				podport = port
-			}
-			liskey := &vmv1.PortMap{
-				Protocol: proto,
-				Port:     int32(port),
-				PodPort:  int32(podport),
-			}
-			oldlis = append(oldlis, liskey)
-		}
-	})
-
-	newportmaps := orderListens(oldlis, currentlis, newips)
-	klog.V(2).Info("portmap new order: ", newportmaps)
-	spec.LoadBalance.Ports = newportmaps
+	//TODO parse old listens, but now we do not need!
+	for _, dv := range spec.LoadBalance.Ports {
+		tmp := dv.DeepCopy()
+		tmp.Ips = newips
+		klog.V(2).Infof("append portmap %v", tmp)
+		newports = append(newports, tmp)
+	}
+	spec.LoadBalance.Ports = newports
 	return
 }
 
@@ -333,13 +317,16 @@ func orderListens(src []*vmv1.PortMap, dst map[string]*vmv1.PortMap, ips []strin
 			newpm.Ips = ips
 		} else {
 			newpm.Ips = nil
+			newpm.Port = 0
 		}
+		klog.V(2).Infof("reorder listen append portmap %v", newpm)
 		ss = append(ss, newpm)
 	}
 	//TODO dst value is reused
 	for dstk, dv := range dst {
 		if _, ok := srcmap[dstk]; !ok {
 			dv.Ips = ips
+			klog.V(2).Infof("reorder listen append portmap %v", dv)
 			ss = append(ss, dv)
 		}
 	}
@@ -362,6 +349,7 @@ func orderMembers(src []string, dst map[string]struct{}) (ss []string) {
 	}
 	for dstk, _ := range dst {
 		if _, ok := srcmap[dstk]; !ok {
+			klog.V(2).Infof("append ip from dst %v", dstk)
 			ss = append(ss, dstk)
 		}
 	}
@@ -391,5 +379,11 @@ func validLbSpec(spec *vmv1.LoadBalanceSpec) error {
 }
 
 func portMapHashKey(v *vmv1.PortMap) string {
-	return fmt.Sprintf("%s%d%d", v.Protocol, v.Port, v.PodPort)
+	var p int32
+	if v.Port == 0 {
+		p = v.PodPort
+	} else {
+		p = v.Port
+	}
+	return fmt.Sprintf("%s%d", v.Protocol, p)
 }

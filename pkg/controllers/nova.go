@@ -207,6 +207,7 @@ func (p *Nova) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		//Remove stack if pod link not exist
 		if removeRes {
 			if vm.Status.VmStatus != nil {
+				klog.V(2).Infof("remove nova resource")
 				p.heat.DeleteStack(vm.Status.VmStatus)
 				p.mu.Lock()
 				delete(p.vms, vm.Status.VmStatus.StackName)
