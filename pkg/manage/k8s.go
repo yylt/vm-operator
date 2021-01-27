@@ -146,6 +146,9 @@ func (p *K8sMgr) loop(timed time.Duration, getlbfn func(link string) net.IP) {
 		case <-time.NewTimer(timed).C:
 			p.mu.RLock()
 			for link, val := range p.lbinfo {
+				if val.isdelete == true {
+					delete(p.lbinfo, link)
+				}
 				if !val.isservice {
 					continue
 				}
@@ -153,7 +156,7 @@ func (p *K8sMgr) loop(timed time.Duration, getlbfn func(link string) net.IP) {
 					val.lbip = getlbfn(link)
 				}
 				if val.lbip == nil {
-					klog.Infof("not found load balance ip on link:%v", val.link)
+					klog.Infof("not found lb ip for link:%v, skip sync service", val.link)
 					continue
 				}
 				hashid := p.hashinfo(val)
@@ -165,9 +168,6 @@ func (p *K8sMgr) loop(timed time.Duration, getlbfn func(link string) net.IP) {
 				err = p.updateService(val.lbip, val)
 				if err != nil {
 					klog.Infof("update service failed:%v", err)
-				}
-				if val.isdelete == true {
-					delete(p.lbinfo, link)
 				}
 				val.hashid = hashid
 				klog.V(4).Infof("sync service done, delete:%v, link:%v", val.isdelete, val.link)
@@ -414,14 +414,14 @@ example:
      }]
 */
 func kuryrIps(object *unstructured.Unstructured, fn func(string, net.IP)) error {
-
+	klog.V(2).Infof("type find ip on pod(%s/%s)", object.GetNamespace(), object.GetName())
 	networks, found, err := unstructured.NestedString(object.Object, "metadata", "annotations", network_status)
 	if err != nil || !found {
 		return fmt.Errorf("not found %s in annotations", network_status)
 	}
 	jsondata := gjson.Parse(networks)
 	if !jsondata.IsArray() {
-		return fmt.Errorf("%s in annotations type is %s, except array", network_status, jsondata.Type)
+		return fmt.Errorf("%s type is %s, except array", network_status, jsondata.Type)
 	}
 
 	jsondata.ForEach(func(_, value gjson.Result) bool {
@@ -489,8 +489,9 @@ func getLinkLabels(client dynamic.Interface, link string) (map[string]string, *R
 
 func getPodSecondIps(client dynamic.Interface, link string, fn func(string, net.IP)) error {
 	var (
-		err error
-		ctx = goctx.Background()
+		err  error
+		ctx  = goctx.Background()
+		errs = util.NewErr()
 	)
 
 	maps, res, err := getLinkLabels(client, link)
@@ -522,11 +523,8 @@ func getPodSecondIps(client dynamic.Interface, link string, fn func(string, net.
 		return fmt.Errorf("list pods failed, err=%s", err)
 	}
 	for _, result := range results.Items {
-		err = kuryrIps(&result, fn)
-		if err != nil {
-			return err
-		}
+		errs.Add(kuryrIps(&result, fn))
 	}
 
-	return nil
+	return errs.Error()
 }

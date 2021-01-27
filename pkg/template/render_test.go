@@ -80,6 +80,11 @@ func TestRenderByName(t *testing.T) {
 						Protocol: "TCP",
 					},
 					&vmv1.PortMap{
+						Ips:      []string{"4.4.4.4"},
+						Port:     0,
+						Protocol: "",
+					},
+					&vmv1.PortMap{
 						Ips:      []string{"2.2.2.2"},
 						Port:     20,
 						Protocol: "TCP",
