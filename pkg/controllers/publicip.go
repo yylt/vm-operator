@@ -25,12 +25,14 @@ type FipResult struct {
 	Status string
 	Ip     string
 	Name   string
+	PortId string
 }
 
 func (s *FipResult) DeepCopyFrom(ls *floatingips.FloatingIP) {
 	s.ID = ls.ID
 	s.Status = ls.Status
 	s.Ip = ls.FloatingIP
+	s.PortId = ls.PortID
 }
 
 func (s *FipResult) DeepCopy() *FipResult {
@@ -39,6 +41,7 @@ func (s *FipResult) DeepCopy() *FipResult {
 	tmp.Name = s.Name
 	tmp.Status = s.Status
 	tmp.Ip = s.Ip
+	tmp.PortId = s.PortId
 	return tmp
 }
 
@@ -123,25 +126,28 @@ type Floatip struct {
 	portop *port
 
 	fmu sync.RWMutex
-	//key: portID, because name ont included in floatingip data struct
-	//value: FipRessult
-	fips map[string]*FipResult
 
-	//key: floating ip , if use static ip
+	// create floating ip
+	//key: portID,
+	//value: FipRessult
+	dynamics map[string]*FipResult
+
+	// use existed floating ip, jsut create FloatingIPAssociation
+	//key: floatingip
 	//value: FipRessult
 	statics map[string]*FipResult
 }
 
 func NewFloatip(heat *Heat, mgr *manage.OpenMgr, k8smgr *manage.K8sMgr, Lb *LoadBalance) *Floatip {
 	fip := &Floatip{
-		mgr:     mgr,
-		k8smgr:  k8smgr,
-		Lb:      Lb,
-		heat:    heat,
-		portop:  newPort(mgr),
-		fmu:     sync.RWMutex{},
-		fips:    make(map[string]*FipResult),
-		statics: make(map[string]*FipResult),
+		mgr:      mgr,
+		k8smgr:   k8smgr,
+		Lb:       Lb,
+		heat:     heat,
+		portop:   newPort(mgr),
+		fmu:      sync.RWMutex{},
+		dynamics: make(map[string]*FipResult),
+		statics:  make(map[string]*FipResult),
 	}
 	mgr.Regist(manage.Fip, fip.addFipStore)
 	return fip
@@ -157,7 +163,7 @@ func (p *Floatip) addFipStore(pages pagination.Page) {
 	p.fmu.RLock()
 	defer p.fmu.RUnlock()
 	for _, fip := range lists {
-		v, ok := p.fips[fip.PortID]
+		v, ok := p.dynamics[fip.PortID]
 		if ok {
 			klog.V(3).Infof("callback update floating ip stat: %v", fip)
 			v.DeepCopyFrom(&fip)
@@ -171,7 +177,7 @@ func (p *Floatip) addFipStore(pages pagination.Page) {
 	return
 }
 
-func (p *Floatip) addFip(spec *vmv1.PublicSepc, stat *vmv1.ResourceStatus) {
+func (p *Floatip) addDynamicListen(spec *vmv1.PublicSepc, stat *vmv1.ResourceStatus) {
 	if spec == nil || spec.PortId == "" {
 		return
 	}
@@ -190,15 +196,17 @@ func (p *Floatip) addFip(spec *vmv1.PublicSepc, stat *vmv1.ResourceStatus) {
 	defer p.fmu.Unlock()
 	//TODO much floating ip use same portid?
 	// should add fixip as another key?
-	_, ok := p.fips[spec.PortId]
+	_, ok := p.dynamics[spec.PortId]
 	if !ok {
 		klog.V(2).Infof("add listen floating ip by portId: %v", spec.PortId)
-		p.fips[spec.PortId] = fipres
+		p.dynamics[spec.PortId] = fipres
 	}
 	return
 }
 
-func (p *Floatip) updateStaticId(ip string, stat *vmv1.ResourceStatus) string {
+// try get floating ip id
+// and set listen on statics cache
+func (p *Floatip) getStaticListen(floatip string, stat *vmv1.ResourceStatus) string {
 	var fipres *FipResult
 	if stat != nil {
 		fipres = &FipResult{
@@ -212,20 +220,22 @@ func (p *Floatip) updateStaticId(ip string, stat *vmv1.ResourceStatus) string {
 	}
 	p.fmu.RLock()
 	defer p.fmu.RUnlock()
-	v, ok := p.statics[ip]
+	v, ok := p.statics[floatip]
 	if ok {
 		return v.ID
 	} else {
-		klog.V(2).Infof("add listen floating ip by floatip: %v", ip)
-		p.statics[ip] = fipres
+		klog.V(3).Infof("add listen floating ip: %v", floatip)
+		p.statics[floatip] = fipres
 	}
 	return ""
 }
 
+// update stat resStat from cache
 func (p *Floatip) update(spec *vmv1.PublicSepc, stat *vmv1.ResourceStatus) {
 	var (
-		v  *FipResult
-		ok bool
+		v        *FipResult
+		ok       bool
+		hiddenIp bool
 	)
 	p.fmu.RLock()
 	defer p.fmu.RUnlock()
@@ -234,18 +244,27 @@ func (p *Floatip) update(spec *vmv1.PublicSepc, stat *vmv1.ResourceStatus) {
 		if !ok {
 			return
 		}
+		if v.PortId != spec.PortId {
+			klog.V(2).Infof("expect port id %s, but get %s, hidden floating ip", spec.PortId, v.PortId)
+			hiddenIp = true
+		}
 	} else {
-		v, ok = p.fips[spec.PortId]
+		v, ok = p.dynamics[spec.PortId]
 		if !ok {
 			return
 		}
 	}
 
 	klog.V(3).Infof("update floating ip ResourceStatus %v", v)
+
 	stat.ServerStat.ResStat = v.Status
-	stat.ServerStat.Ip = v.Ip
 	stat.ServerStat.Id = v.ID
 	stat.ServerStat.ResName = v.Name
+	if hiddenIp {
+		stat.ServerStat.Ip = ""
+	} else {
+		stat.ServerStat.Ip = v.Ip
+	}
 }
 
 func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
@@ -274,7 +293,7 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 			if vm.Status.PubStatus != nil {
 				p.heat.DeleteStack(vm.Status.PubStatus)
 				p.fmu.Lock()
-				delete(p.fips, id)
+				delete(p.dynamics, id)
 				p.fmu.Unlock()
 			}
 		} else {
@@ -337,22 +356,29 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	} else {
 		genname = stat.StackName
 	}
-	if spec.Address.Ip != "" {
-		spec.FloatIpId = p.updateStaticId(spec.Address.Ip, stat)
-		if spec.FloatIpId == "" {
-			return fmt.Errorf("not found floating ip by address:%v", spec.Address.Ip)
-		}
-	}
+
 	spec.Name = genname
 	spec.FixIp = ip
 	spec.PortId = id
 	spec.Mbps = spec.Mbps * 1024
+	//ip is not nil which means create FloatingIPAssociation resource
+	// 1. floating ip id (which only need when create FloatingIPAssociation)
+	// 2. port id
+	// 3. lb ip (fix address ip)
+	if spec.Address.Ip != "" {
+		spec.FloatIpId = p.getStaticListen(spec.Address.Ip, stat)
+		if spec.FloatIpId == "" {
+			return fmt.Errorf("not found floating ip by address:%v", spec.Address.Ip)
+		}
+	}
 
 	err = p.heat.Process(manage.Fip, vm)
 	if err != nil {
 		return err
 	}
-	p.addFip(spec, stat)
+	if spec.Address.Ip == "" {
+		p.addDynamicListen(spec, stat)
+	}
 	return nil
 }
 

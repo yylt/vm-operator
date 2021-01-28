@@ -79,7 +79,7 @@ func (p *LoadBalance) GetResource(vm *vmv1.VirtualMachine) *vmv1.ServerStat {
 }
 
 func (p *LoadBalance) GetIpByLink(link string) net.IP {
-	id := util.Hashid([]byte(link))
+	id := util.Hashid(util.Str2bytes(link))
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	v, ok := p.linkname[id]
@@ -127,7 +127,7 @@ func (p *LoadBalance) addLb(stat *vmv1.ResourceStatus, spec *vmv1.LoadBalanceSpe
 			Name: stat.ServerStat.ResName,
 		}
 		if spec.Link != "" {
-			id := util.Hashid([]byte(spec.Link))
+			id := util.Hashid(util.Str2bytes(spec.Link))
 			p.linkname[id] = resname
 		}
 	}
@@ -266,8 +266,8 @@ func reorderSpec(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) {
 	var (
 		oldips     []string
 		currentips = map[string]struct{}{}
-
-		newports []*vmv1.PortMap
+		oldmaps    = make(map[string]struct{})
+		newports   []*vmv1.PortMap
 	)
 
 	for _, pm := range spec.LoadBalance.Ports {
@@ -278,9 +278,13 @@ func reorderSpec(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) {
 		}
 	}
 	//fix members
-	template.FindLbMembers([]byte(stat.Template), spec.LoadBalance.Name, func(value *gjson.Result) {
+	template.FindLbMembers(util.Str2bytes(stat.Template), spec.LoadBalance.Name, func(value *gjson.Result) {
 		if value.IsObject() {
 			ipaddr := value.Get("address").String()
+			if _, ok := oldmaps[ipaddr]; ok {
+				return
+			}
+			oldmaps[ipaddr] = struct{}{}
 			oldips = append(oldips, ipaddr)
 		}
 	})
@@ -293,6 +297,7 @@ func reorderSpec(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) {
 
 	//TODO parse old listens, but now we do not need!
 	for _, dv := range spec.LoadBalance.Ports {
+		dv.Ips = nil
 		tmp := dv.DeepCopy()
 		tmp.Ips = newips
 		klog.V(2).Infof("append portmap %v", tmp)
