@@ -8,8 +8,6 @@ import (
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
 	"easystack.io/vm-operator/pkg/manage"
 	"easystack.io/vm-operator/pkg/template"
-	"easystack.io/vm-operator/pkg/util"
-
 	klog "k8s.io/klog/v2"
 )
 
@@ -97,7 +95,7 @@ func updateCondition(stat *vmv1.VirtualMachineStatus, op string, err error) {
 	resstr := op
 	for _, cond := range stat.Conditions {
 		if cond.Type == resstr {
-			if util.Hashid([]byte(cond.Reason)) == util.Hashid([]byte(err.Error())) {
+			if cond.Reason == err.Error() {
 				return
 			}
 		}
