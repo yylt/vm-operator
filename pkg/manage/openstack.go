@@ -62,7 +62,7 @@ func (or OpResource) ListPages(pv *gophercloud.ProviderClient) (pagination.Pager
 
 			return pagination.Pager{}, err
 		}
-		return stacks.List(cli, stacks.ListOpts{AllTenants: true, Tags: util.StackTag}), nil
+		return stacks.List(cli, stacks.ListOpts{AllTenants: true, ShowHidden: true, Tags: util.StackTag}), nil
 	case Port:
 		cli, err := openstack.NewNetworkV2(pv, gophercloud.EndpointOpts{})
 		if err != nil {

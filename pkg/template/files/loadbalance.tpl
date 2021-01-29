@@ -15,7 +15,7 @@ resources:
 {{ end }}
 
 {{ range $index, $v := $.loadbalance.port_map }}
-
+{{ if $v.ips }}
   {{ $.loadbalance.name }}-pool{{ $index }}:
     type: 'OS::Neutron::LBaaS::Pool'
     depends_on: {{ $.loadbalance.name }}-listen{{ $index }}
@@ -49,6 +49,6 @@ resources:
       weight: 1
       address: {{ $ip }}
 {{ end }}
-
+{{ end }}
 {{ end }}
 {{ end }}
