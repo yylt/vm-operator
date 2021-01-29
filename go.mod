@@ -19,3 +19,5 @@ require (
 	sigs.k8s.io/controller-runtime v0.7.0
 	sigs.k8s.io/yaml v1.2.0
 )
+
+replace github.com/gophercloud/gophercloud => github.com/es-container/gophercloud v0.16.0
