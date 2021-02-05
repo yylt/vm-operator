@@ -159,7 +159,7 @@ func (h *Heat) RegistReOrderFunc(kind template.Kind, fn Reorderfn) {
 }
 
 // the stat on vm must not be nil
-func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) error {
+func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) (reterr error) {
 	var (
 		stat *vmv1.ResourceStatus
 		tpl  template.Kind
@@ -187,6 +187,13 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) error {
 			klog.Errorf("delete stack failed:%v", err)
 		}
 		return err
+	}
+	defer func() {
+		reterr = h.update(stat)
+	}()
+	if stat.Stat == S_UPDATE_IN_PROGRESS && stat.StackID != "" {
+		klog.V(3).Info("stack %s is in Progress Stat, skip update", stat.StackName)
+		return
 	}
 	fpath, hashid, err := h.generateTmpFile(tpl, &vm.Spec, stat)
 	if err != nil {
