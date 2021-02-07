@@ -142,14 +142,13 @@ func (p *Floatip) update(spec *vmv1.PublicSepc, stat *vmv1.ResourceStatus) {
 	klog.V(3).Infof("update floating ip ResourceStatus %v", v)
 
 	if v.unbind {
-		stat.ServerStat = vmv1.ServerStat{}
+		stat.ServerStat.Ip = ""
 		klog.V(2).Infof("portid(%v) had unbinded frpm floating ip!", spec.PortId)
-		return
+	} else {
+		stat.ServerStat.Ip = v.Ip
 	}
 	stat.ServerStat.ResStat = v.Status
 	stat.ServerStat.Id = v.ID
-	stat.ServerStat.Ip = v.Ip
-
 }
 
 func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
