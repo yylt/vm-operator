@@ -41,6 +41,9 @@ type StackResult struct {
 	Name         string `json:"stack_name"`
 	Status       string `json:"stack_status"`
 	StatusReason string `json:"stack_status_reason"`
+
+	//had sync or not
+	sync bool
 }
 
 type Reorderfn func(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus)
@@ -103,6 +106,27 @@ func NewHeat(engine *template.Template, tmpdir string, opmgr *manage.OpenMgr) *H
 	return ht
 }
 
+func (h *Heat) isSynced(id string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	v, ok := h.stacks[id]
+	if !ok {
+		return true
+	}
+	return v.sync
+}
+
+func (h *Heat) listenById(id string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	v, ok := h.stacks[id]
+	if !ok {
+		h.stacks[id] = &StackResult{}
+	} else {
+		v.sync = false
+	}
+}
+
 func (h *Heat) update(stat *vmv1.ResourceStatus) error {
 	if stat == nil || stat.StackID == "" {
 		return fmt.Errorf("update failed: stackId not found")
@@ -110,13 +134,10 @@ func (h *Heat) update(stat *vmv1.ResourceStatus) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	v, ok := h.stacks[stat.StackID]
-	if !ok {
-		klog.Infof("add listen stack by id :%v", stat.StackID)
-		h.stacks[stat.StackID] = &StackResult{
-			Status: stat.Stat,
-		}
+	if !ok || v.sync == false {
+		klog.V(2).Infof("stack id(%v) not synced", stat.StackID)
+		return nil
 	}
-	v = h.stacks[stat.StackID]
 	stat.Stat = getStackStat(v)
 	if stat.Stat == Failed {
 		if v.StatusReason == "" {
@@ -134,14 +155,17 @@ func (h *Heat) addStore(page pagination.Page) {
 		klog.Errorf("stacks extract page failed:%v", err)
 		return
 	}
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	for _, stack := range lists {
 		v, ok := h.stacks[stack.ID]
 		if ok {
 			klog.V(3).Infof("callback update stack:%v", stack)
 			v.DeepCopyFrom(&stack)
 		}
+	}
+	for _, v := range h.stacks {
+		v.sync = true
 	}
 	return
 }
@@ -191,8 +215,8 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) (reterr 
 	defer func() {
 		reterr = h.update(stat)
 	}()
-	if stat.Stat == S_UPDATE_IN_PROGRESS && stat.StackID != "" {
-		klog.V(3).Info("stack %s is in Progress Stat, skip update", stat.StackName)
+	if !h.isSynced(stat.StackID) {
+		klog.V(2).Infof("stack %s is in Progress Stat, skip update", stat.StackName)
 		return
 	}
 	fpath, hashid, err := h.generateTmpFile(tpl, &vm.Spec, stat)
@@ -213,6 +237,8 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) (reterr 
 			}
 		}
 		stat.HashId = hashid
+		stat.Stat = string(vmv1.Creating)
+		h.listenById(stat.StackID)
 	}
 	if stat.HashId != hashid {
 		// use drone user to update stack, the stack ownership is also who created
@@ -221,8 +247,10 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) (reterr 
 			klog.Errorf("update stack failed:%v", err)
 		}
 		stat.HashId = hashid
+		stat.Stat = string(vmv1.Updating)
+		h.listenById(stat.StackID)
 	}
-	return h.update(stat)
+	return
 }
 
 // generate template file
@@ -301,7 +329,6 @@ func (h *Heat) createStack(fpath string, auth *vmv1.AuthSpec, stat *vmv1.Resourc
 	result, err := rst.Extract()
 	if result != nil {
 		stat.StackID = result.ID
-		stat.Stat = string(vmv1.Creating)
 		return nil
 	}
 	if err != nil {

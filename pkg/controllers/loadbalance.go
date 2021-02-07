@@ -22,6 +22,12 @@ type LbResult struct {
 	Id   string
 	Ip   string
 	Name string
+
+	//had sync or not
+	sync bool
+
+	//delete operat by user from openstack api
+	deleted bool
 }
 
 func (s *LbResult) DeepCopy() *LbResult {
@@ -54,6 +60,8 @@ type LoadBalance struct {
 	//value: LbResult
 	lbs map[string]*LbResult
 
+	//key: link hashid
+	// value: lb name
 	linkname map[int64]string
 }
 
@@ -99,13 +107,23 @@ func (p *LoadBalance) addLbStore(page pagination.Page) {
 		klog.Errorf("loadbalancers extract page failed:%v", err)
 		return
 	}
-	p.mu.RLock()
-	defer p.mu.RUnlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	exists := make(map[string]struct{}, len(p.lbs))
 	for _, lb := range lists {
 		v, ok := p.lbs[lb.Name]
 		if ok {
 			klog.V(3).Infof("callback update loadbalance: %v", lb)
 			v.DeepCopyFrom(&lb)
+			exists[lb.Name] = struct{}{}
+			v.deleted = false
+		}
+	}
+	for k, v := range p.lbs {
+		v.sync = true
+		if _, ok := exists[k]; !ok {
+			klog.V(2).Infof("loadbalance(%v) not found", v.Name)
+			v.deleted = true
 		}
 	}
 	return
@@ -142,15 +160,25 @@ func (p *LoadBalance) update(stat *vmv1.ResourceStatus) {
 	resname := stat.StackName
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	if len(p.lbs) == 0 {
+		return
+	}
+
 	v, ok := p.lbs[resname]
-	if !ok {
+	if !ok || v.sync == false {
 		return
 	}
 	klog.V(3).Infof("update load balance ResourceStatus:%v", v)
+	if v.deleted {
+		klog.V(2).Infof("load balance(%v) had been deleted", v.Name)
+		stat.ServerStat = vmv1.ServerStat{}
+		return
+	}
 	stat.ServerStat.ResStat = v.Stat
 	stat.ServerStat.Ip = v.Ip
 	stat.ServerStat.Id = v.Id
 	stat.ServerStat.ResName = v.Name
+
 }
 
 func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
