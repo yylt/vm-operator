@@ -55,17 +55,23 @@ type Floatip struct {
 	//key: portID,
 	//value: FipRessult
 	caches map[string]*FipResult
+
+	// should find ip -> id when create association
+	// key: floating ip
+	// value: fip id
+	statics map[string]string
 }
 
 func NewFloatip(heat *Heat, mgr *manage.OpenMgr, k8smgr *manage.K8sMgr, Lb *LoadBalance) *Floatip {
 	fip := &Floatip{
-		mgr:    mgr,
-		k8smgr: k8smgr,
-		Lb:     Lb,
-		heat:   heat,
-		portop: newPort(mgr),
-		fmu:    sync.RWMutex{},
-		caches: make(map[string]*FipResult),
+		mgr:     mgr,
+		k8smgr:  k8smgr,
+		Lb:      Lb,
+		heat:    heat,
+		portop:  newPort(mgr),
+		fmu:     sync.RWMutex{},
+		caches:  make(map[string]*FipResult),
+		statics: make(map[string]string),
 	}
 	mgr.Regist(manage.Fip, fip.addFipStore)
 	return fip
@@ -89,6 +95,10 @@ func (p *Floatip) addFipStore(pages pagination.Page) {
 			exists[fip.PortID] = struct{}{}
 			v.unbind = false
 		}
+		_, ok = p.statics[fip.FloatingIP]
+		if ok {
+			p.statics[fip.FloatingIP] = fip.ID
+		}
 	}
 	for k, v := range p.caches {
 		v.sync = true
@@ -101,6 +111,20 @@ func (p *Floatip) addFipStore(pages pagination.Page) {
 
 // try get floating ip id
 // and set listen on statics cache
+func (p *Floatip) findFloatingId(ip string) string {
+	p.fmu.RLock()
+	defer p.fmu.RUnlock()
+	v, ok := p.statics[ip]
+	if ok {
+		return v
+	} else {
+		klog.V(2).Infof("add listen floating ip(%s) to find id", ip)
+		p.statics[ip] = ""
+	}
+	return ""
+}
+
+// add listen by portid
 func (p *Floatip) listenByPortId(portid string, stat *vmv1.ResourceStatus) string {
 	var fipres *FipResult
 	if stat != nil {
@@ -114,11 +138,9 @@ func (p *Floatip) listenByPortId(portid string, stat *vmv1.ResourceStatus) strin
 	}
 	p.fmu.RLock()
 	defer p.fmu.RUnlock()
-	v, ok := p.caches[portid]
-	if ok {
-		return v.ID
-	} else {
-		klog.V(3).Infof("add listen floating ip on portid: %v", portid)
+	_, ok := p.caches[portid]
+	if !ok {
+		klog.V(2).Infof("listen floating ip on portid: %v", portid)
 		p.caches[portid] = fipres
 	}
 	return ""
@@ -142,11 +164,11 @@ func (p *Floatip) update(spec *vmv1.PublicSepc, stat *vmv1.ResourceStatus) {
 	klog.V(3).Infof("update floating ip ResourceStatus %v", v)
 
 	if v.unbind {
-		stat.ServerStat.Ip = ""
+		stat.ServerStat = vmv1.ServerStat{}
 		klog.V(2).Infof("portid(%v) had unbinded frpm floating ip!", spec.PortId)
-	} else {
-		stat.ServerStat.Ip = v.Ip
+		return
 	}
+	stat.ServerStat.Ip = v.Ip
 	stat.ServerStat.ResStat = v.Status
 	stat.ServerStat.Id = v.ID
 }
@@ -251,8 +273,9 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	// 1. floating ip id (which only need when create FloatingIPAssociation)
 	// 2. port id
 	// 3. lb ip (fix address ip)
+	p.listenByPortId(spec.PortId, stat)
 	if spec.Address.Ip != "" {
-		spec.FloatIpId = p.listenByPortId(spec.PortId, stat)
+		spec.FloatIpId = p.findFloatingId(spec.Address.Ip)
 		if spec.FloatIpId == "" {
 			return fmt.Errorf("not found floating ip by address:%v", spec.Address.Ip)
 		}
