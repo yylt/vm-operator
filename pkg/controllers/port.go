@@ -1,11 +1,12 @@
 package controllers
 
 import (
+	"sync"
+
 	"easystack.io/vm-operator/pkg/manage"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/ports"
 	"github.com/gophercloud/gophercloud/pagination"
 	"k8s.io/klog/v2"
-	"sync"
 )
 
 type portResult struct {
