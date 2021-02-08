@@ -215,13 +215,14 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	if spec.Link == "" {
 		// Try find {portId,fixip} from loadbalance info
 		lbres := p.Lb.GetResource(vm)
-		if lbres == nil || lbres.Id == "" || lbres.Ip == "" {
+		//TODO CreateTime is portId!!!
+		if lbres == nil || lbres.CreateTime == "" || lbres.Ip == "" {
 			klog.Infof("not found load balance ip and portid")
 			return nil
 		}
-		klog.V(3).Infof("fetch load balance ip:%s,id:%v", lbres.Ip, lbres.Id)
+		klog.V(3).Infof("fetch load balance ip:%s,id:%v", lbres.Ip, lbres.CreateTime)
 		ip = lbres.Ip
-		id = lbres.Id
+		id = lbres.CreateTime
 	} else {
 		// Try find {portId,fixip} from pod link
 		k8res := &manage.Resource{}
