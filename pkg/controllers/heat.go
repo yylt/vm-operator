@@ -106,12 +106,21 @@ func NewHeat(engine *template.Template, tmpdir string, opmgr *manage.OpenMgr) *H
 	return ht
 }
 
+//check stack had complete
+// means stack is failed or successed
 func (h *Heat) isSynced(id string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	v, ok := h.stacks[id]
 	if !ok {
-		return true
+		h.stacks[id] = &StackResult{}
+		return false
+	}
+	if !v.sync {
+		return v.sync
+	}
+	if v.Status == S_CREATE_IN_PROGRESS || v.Status == S_UPDATE_IN_PROGRESS {
+		return false
 	}
 	return v.sync
 }
@@ -215,7 +224,7 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) (reterr 
 	defer func() {
 		reterr = h.update(stat)
 	}()
-	if !h.isSynced(stat.StackID) {
+	if stat.StackID != "" && !h.isSynced(stat.StackID) {
 		klog.V(2).Infof("stack %s is in Progress Stat, skip update", stat.StackName)
 		return
 	}

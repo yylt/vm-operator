@@ -20,6 +20,7 @@ import (
 type LbResult struct {
 	Stat string
 	Id   string
+	Lbid string
 	Ip   string
 	Name string
 
@@ -34,6 +35,7 @@ func (s *LbResult) DeepCopy() *LbResult {
 	tmp := new(LbResult)
 	tmp.Id = s.Id
 	tmp.Name = s.Name
+	tmp.Lbid = s.Lbid
 	tmp.Stat = s.Stat
 	tmp.Ip = s.Ip
 	return tmp
@@ -45,6 +47,7 @@ func (s *LbResult) DeepCopyFrom(ls *loadbalancers.LoadBalancer) {
 	//s.Id=ls.ID
 	s.Id = ls.VipPortID
 	s.Name = ls.Name
+	s.Lbid = ls.ID
 	s.Ip = ls.VipAddress
 	s.Stat = ls.OperatingStatus
 }
@@ -140,9 +143,10 @@ func (p *LoadBalance) addLb(stat *vmv1.ResourceStatus, spec *vmv1.LoadBalanceSpe
 	if !ok {
 		p.lbs[resname] = &LbResult{
 			Stat: stat.ServerStat.ResStat,
-			Id:   stat.ServerStat.Id,
+			Lbid: stat.ServerStat.Id,
 			Ip:   stat.ServerStat.Ip,
 			Name: stat.ServerStat.ResName,
+			Id:   stat.ServerStat.CreateTime,
 		}
 		if spec.Link != "" {
 			id := util.Hashid(util.Str2bytes(spec.Link))
@@ -176,9 +180,10 @@ func (p *LoadBalance) update(stat *vmv1.ResourceStatus) {
 	}
 	stat.ServerStat.ResStat = v.Stat
 	stat.ServerStat.Ip = v.Ip
-	stat.ServerStat.Id = v.Id
+	stat.ServerStat.Id = v.Lbid
 	stat.ServerStat.ResName = v.Name
 
+	stat.ServerStat.CreateTime = v.Id
 }
 
 func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
@@ -256,7 +261,7 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		for _, v := range k8sres {
 			ips = append(ips, v.Ip.String())
 		}
-		klog.V(2).Infof("update pod ip list:%v", ips)
+		klog.V(2).Infof("find pod ip list:%v", ips)
 	}
 	for i, _ := range spec.Ports {
 		spec.Ports[i].Ips = ips
