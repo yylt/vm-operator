@@ -2,11 +2,11 @@ package template
 
 import (
 	"encoding/json"
-	"sigs.k8s.io/yaml"
 	"testing"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
 	"github.com/tidwall/gjson"
+	"sigs.k8s.io/yaml"
 )
 
 var (
@@ -110,14 +110,14 @@ func TestRenderByName(t *testing.T) {
 		}
 		t.Logf("net: %s err:%s", bs, err)
 
-		FindLbMembers(jsonbs, "net", func(value *gjson.Result) {
+		FindLbMembers(jsonbs, "net", func(_ int, value *gjson.Result) {
 			if value.IsObject() {
 				ipaddr := value.Get("address").String()
 				t.Log("find address:", ipaddr)
 			}
 		})
 
-		FindLbListens(jsonbs, "net", func(value *gjson.Result) {
+		FindLbListens(jsonbs, "net", func(_ int, value *gjson.Result) {
 			if value.IsObject() {
 				proto := value.Get("protocol").String()
 				port := value.Get("protocol_port").Int()
