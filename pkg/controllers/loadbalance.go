@@ -17,6 +17,26 @@ import (
 	klog "k8s.io/klog/v2"
 )
 
+type sortIpByIndex struct {
+	idx int
+	ip  net.IP
+}
+
+type sortIps []*sortIpByIndex
+
+func (s sortIps) Swap(i, j int) {
+	s[i].idx, s[j].idx = s[j].idx, s[i].idx
+	s[i].ip, s[j].ip = s[j].ip, s[i].ip
+}
+
+func (s sortIps) Len() int {
+	return len(s)
+}
+
+func (s sortIps) Less(i, j int) bool {
+	return s[i].idx < s[j].idx
+}
+
 type LbResult struct {
 	Stat string
 	Id   string
@@ -301,8 +321,11 @@ func reorderSpec(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) {
 		currentips = map[string]struct{}{}
 		oldmaps    = make(map[string]struct{})
 		newports   []*vmv1.PortMap
+
+		sorts sortIps
 	)
 
+	// ip in ports is alpha sort
 	for _, pm := range spec.LoadBalance.Ports {
 		if len(currentips) == 0 {
 			for _, addr := range pm.Ips {
@@ -310,17 +333,42 @@ func reorderSpec(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) {
 			}
 		}
 	}
-	//fix members
-	template.FindLbMembers(util.Str2bytes(stat.Template), spec.LoadBalance.Name, func(value *gjson.Result) {
+	// fix members
+	// if ip-0 in member-1, and member-1 must use ip-0 always.
+	template.FindLbMembers(util.Str2bytes(stat.Template), spec.LoadBalance.Name, func(index int, value *gjson.Result) {
 		if value.IsObject() {
 			ipaddr := value.Get("address").String()
+			ipa := net.ParseIP(ipaddr)
+			if len(ipa) == 0 {
+				klog.Errorf("index %d, address is %s, can not parse", index, ipaddr)
+				return
+			}
 			if _, ok := oldmaps[ipaddr]; ok {
 				return
 			}
 			oldmaps[ipaddr] = struct{}{}
-			oldips = append(oldips, ipaddr)
+
+			sorts = append(sorts, &sortIpByIndex{
+				idx: index,
+				ip:  ipa,
+			})
 		}
 	})
+	sort.Sort(sorts)
+
+	// index should start with 0
+	// use nil replace when index not found
+	// that will keep consistent with last stack template
+	i := 0
+	for _, v := range sorts {
+		for i < v.idx {
+			oldips = append(oldips, "")
+			i++
+		}
+		oldips = append(oldips, v.ip.String())
+		i++
+	}
+
 	if len(oldips) == 0 || len(currentips) == 0 {
 		return
 	}
@@ -328,7 +376,8 @@ func reorderSpec(spec *vmv1.VirtualMachineSpec, stat *vmv1.ResourceStatus) {
 	newips := orderMembers(oldips, currentips)
 	klog.V(2).Info("members new order: ", newips)
 
-	//TODO parse old listens, but now we do not need!
+	// TODO parse old listens, but it is not required.
+	// listens can not update now.
 	for _, dv := range spec.LoadBalance.Ports {
 		dv.Ips = nil
 		tmp := dv.DeepCopy()
@@ -376,18 +425,21 @@ func orderMembers(src []string, dst map[string]struct{}) (ss []string) {
 		srcmap = make(map[string]struct{})
 	)
 	for _, v := range src {
+		if v == "" {
+			continue
+		}
 		srcmap[v] = struct{}{}
 	}
-	for _, srck := range src {
-		if _, ok := dst[srck]; ok {
-			ss = append(ss, srck)
+	for _, v := range src {
+		if _, ok := dst[v]; ok {
+			ss = append(ss, v)
 		} else {
 			ss = append(ss, "")
 		}
 	}
 	for dstk, _ := range dst {
 		if _, ok := srcmap[dstk]; !ok {
-			klog.V(2).Infof("append ip from dst %v", dstk)
+			klog.V(2).Infof("append ip %v", dstk)
 			ss = append(ss, dstk)
 		}
 	}

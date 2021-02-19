@@ -1,12 +1,12 @@
 package template
 
 import (
+	"easystack.io/vm-operator/pkg/util"
 	"fmt"
 	"io/ioutil"
 	"strings"
 	"text/template"
-
-	"easystack.io/vm-operator/pkg/util"
+	"unicode"
 
 	"github.com/Masterminds/sprig"
 	"github.com/tidwall/gjson"
@@ -163,7 +163,7 @@ func Parse(result gjson.Result) interface{} {
 // TODO(y) code below actually depend on files/*.tpl
 // update tpl need update here code, also on reversed.
 
-func FindLbMembers(jsonbs []byte, lbname string, fn func(property *gjson.Result)) {
+func FindLbMembers(jsonbs []byte, lbname string, fn func(index int, property *gjson.Result)) {
 	result := gjson.Get(string(jsonbs), "resources")
 	buf := util.GetBuf()
 
@@ -172,9 +172,15 @@ func FindLbMembers(jsonbs []byte, lbname string, fn func(property *gjson.Result)
 
 	if result.IsObject() {
 		result.ForEach(func(key, value gjson.Result) bool {
-			if strings.HasPrefix(key.String(), buf.String()) {
+			keys := key.String()
+			if strings.HasPrefix(keys, buf.String()) {
+				index, err := lastNumber(keys)
+				if err != nil {
+					klog.Errorf("resource name %s not found last number", keys)
+					return true
+				}
 				result := value.Get("properties")
-				fn(&result)
+				fn(index, &result)
 			}
 			return true
 		})
@@ -182,7 +188,7 @@ func FindLbMembers(jsonbs []byte, lbname string, fn func(property *gjson.Result)
 	util.PutBuf(buf)
 }
 
-func FindLbListens(jsonbs []byte, lbname string, fn func(property *gjson.Result)) {
+func FindLbListens(jsonbs []byte, lbname string, fn func(index int, property *gjson.Result)) {
 	result := gjson.Get(string(jsonbs), "resources")
 	buf := util.GetBuf()
 
@@ -191,12 +197,40 @@ func FindLbListens(jsonbs []byte, lbname string, fn func(property *gjson.Result)
 
 	if result.IsObject() {
 		result.ForEach(func(key, value gjson.Result) bool {
-			if strings.HasPrefix(key.String(), buf.String()) {
+			keys := key.String()
+			if strings.HasPrefix(keys, buf.String()) {
+				index, err := lastNumber(keys)
+				if err != nil {
+					klog.Errorf("resource name %s not found last number", keys)
+					return true
+				}
 				result := value.Get("properties")
-				fn(&result)
+				fn(index, &result)
 			}
 			return true
 		})
 	}
 	util.PutBuf(buf)
+}
+
+//get last int number
+// [!0-9][0-9]
+func lastNumber(s string) (int, error) {
+	var (
+		i      = 1
+		tmpnum int
+	)
+	news := strings.TrimRightFunc(s, func(r rune) bool {
+		if unicode.IsNumber(r) {
+			a := i * int(r - '0')
+			i *= 10
+			tmpnum += a
+			return true
+		}
+		return false
+	})
+	if news == "" {
+		return 0, fmt.Errorf("not number")
+	}
+	return tmpnum, nil
 }
