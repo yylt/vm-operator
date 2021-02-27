@@ -141,6 +141,13 @@ func (p *LoadBalance) addLbStore(page pagination.Page) {
 			exists[lb.Name] = struct{}{}
 			v.deleted = false
 		}
+		v, ok = p.lbs[lb.ID]
+		if ok {
+			klog.V(3).Infof("callback update loadbalance: %v", lb)
+			v.DeepCopyFrom(&lb)
+			exists[lb.ID] = struct{}{}
+			v.deleted = false
+		}
 	}
 	for k, v := range p.lbs {
 		v.sync = true
@@ -156,12 +163,22 @@ func (p *LoadBalance) addLb(stat *vmv1.ResourceStatus, spec *vmv1.LoadBalanceSpe
 	if stat == nil || stat.StackName == "" {
 		return
 	}
+	var (
+		bykey string
+	)
 	resname := stat.StackName
+	lbid := stat.ServerStat.Id
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_, ok := p.lbs[resname]
+	if lbid != "" {
+		bykey = lbid
+		delete(p.lbs, resname)
+	} else {
+		bykey = resname
+	}
+	_, ok := p.lbs[bykey]
 	if !ok {
-		p.lbs[resname] = &LbResult{
+		p.lbs[bykey] = &LbResult{
 			Stat: stat.ServerStat.ResStat,
 			Lbid: stat.ServerStat.Id,
 			Ip:   stat.ServerStat.Ip,
@@ -170,7 +187,7 @@ func (p *LoadBalance) addLb(stat *vmv1.ResourceStatus, spec *vmv1.LoadBalanceSpe
 		}
 		if spec.Link != "" {
 			id := util.Hashid(util.Str2bytes(spec.Link))
-			p.linkname[id] = resname
+			p.linkname[id] = bykey
 		}
 	}
 	return
@@ -181,14 +198,20 @@ func (p *LoadBalance) update(stat *vmv1.ResourceStatus) {
 		klog.Infof("lb update failed: not found resource name")
 		return
 	}
+	var bykey string
 	resname := stat.StackName
+	id := stat.ServerStat.Id
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if len(p.lbs) == 0 {
 		return
 	}
-
-	v, ok := p.lbs[resname]
+	if id != "" {
+		bykey = id
+	} else {
+		bykey = resname
+	}
+	v, ok := p.lbs[bykey]
 	if !ok || v.sync == false {
 		return
 	}
