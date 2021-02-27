@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"strings"
 	"sync"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
@@ -22,7 +23,7 @@ import (
 )
 
 const (
-	heatDoneTimeOut = 10
+	heatDoneTimeOut = 60
 	tmpPattern      = "tmp-*.txt"
 
 	Succeeded = "Succeeded"
@@ -196,6 +197,7 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) (reterr 
 	var (
 		stat *vmv1.ResourceStatus
 		tpl  template.Kind
+		isdo bool
 	)
 	if vm == nil {
 		return fmt.Errorf("vm param is nil")
@@ -221,16 +223,14 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) (reterr 
 		}
 		return err
 	}
-	defer func() {
-		reterr = h.update(stat)
-	}()
 	if stat.StackID != "" && !h.isSynced(stat.StackID) {
 		klog.V(2).Infof("stack %s is in Progress Stat, skip update", stat.StackName)
-		return
+		return h.update(stat)
 	}
 	fpath, hashid, err := h.generateTmpFile(tpl, &vm.Spec, stat)
 	if err != nil {
-		return err
+		klog.Errorf("generate template file failed: %v", err)
+		return h.update(stat)
 	}
 	defer func() {
 		if !klog.V(10).Enabled() {
@@ -248,18 +248,31 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) (reterr 
 		stat.HashId = hashid
 		stat.Stat = string(vmv1.Creating)
 		h.listenById(stat.StackID)
+		isdo = true
 	}
 	if stat.HashId != hashid {
 		// use drone user to update stack, the stack ownership is also who created
-		err = h.updateStack(fpath, stat)
+		err = h.updateStack(fpath, stat, true)
 		if err != nil {
 			klog.Errorf("update stack failed:%v", err)
 		}
 		stat.HashId = hashid
 		stat.Stat = string(vmv1.Updating)
 		h.listenById(stat.StackID)
+		isdo = true
 	}
-	return
+	rerr := h.update(stat)
+	if isdo == false {
+		if rerr != nil && strings.Contains(rerr.Error(), "Create timed out") {
+			err = h.updateStack(fpath, stat, false)
+			if err != nil {
+				klog.Error("update after create timeout failed: %v", err)
+			}
+			stat.Stat = string(vmv1.Creating)
+			h.listenById(stat.StackID)
+		}
+	}
+	return rerr
 }
 
 // generate template file
@@ -391,10 +404,11 @@ func (h *Heat) GetStack(id string) *StackResult {
 	return v.DeepCopy()
 }
 
-func (h *Heat) updateStack(fpath string, stat *vmv1.ResourceStatus) error {
+func (h *Heat) updateStack(fpath string, stat *vmv1.ResourceStatus, patch bool) error {
 	var (
 		heatcli *gophercloud.ServiceClient
 		err     error
+		rst     stacks.UpdateResult
 	)
 	h.opmgr.WrapClient(func(cli *gophercloud.ProviderClient) {
 		heatcli, err = openstack.NewOrchestrationV1(cli, gophercloud.EndpointOpts{})
@@ -413,7 +427,12 @@ func (h *Heat) updateStack(fpath string, stat *vmv1.ResourceStatus) error {
 		Timeout: heatDoneTimeOut,
 		Tags:    []string{util.StackTag},
 	}
-	rst := stacks.UpdatePatch(heatcli, stat.StackName, stat.StackID, Opts)
+	if patch {
+		rst = stacks.UpdatePatch(heatcli, stat.StackName, stat.StackID, Opts)
+	} else {
+		rst = stacks.Update(heatcli, stat.StackName, stat.StackID, Opts)
+	}
+
 	err = rst.ExtractErr()
 	if err != nil {
 		if _, ok := err.(gophercloud.ErrDefault409); ok {

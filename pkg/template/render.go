@@ -222,7 +222,7 @@ func lastNumber(s string) (int, error) {
 	)
 	news := strings.TrimRightFunc(s, func(r rune) bool {
 		if unicode.IsNumber(r) {
-			a := i * int(r - '0')
+			a := i * int(r-'0')
 			i *= 10
 			tmpnum += a
 			return true
