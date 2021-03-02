@@ -179,28 +179,26 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		stat           = vm.Status.PubStatus
 		nsname, ip, id string
 		removeRes      bool
+		k8res          = &manage.Resource{}
 	)
 
 	if spec == nil {
 		return nil
 	}
-	err := validPip(spec)
-	if err != nil {
-		return err
-	}
 
 	defer func() {
 		//Remove stack if pod link not exist
 		if removeRes {
-			klog.V(2).Infof("remove publicip resource")
 			if nsname != "" {
+				klog.V(2).Infof("remove port for k8s resource")
 				p.portop.rm(nsname)
 			}
 			if vm.Status.PubStatus != nil {
-				p.heat.DeleteStack(vm.Status.PubStatus)
+				klog.V(2).Infof("remove publicip resource")
 				p.fmu.Lock()
 				delete(p.caches, id)
 				p.fmu.Unlock()
+				reterr = p.heat.Process(manage.Fip, vm)
 			}
 		} else {
 			if reterr == nil && id != "" {
@@ -208,10 +206,26 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 			}
 		}
 	}()
+	if spec.Link != "" {
+		err := manage.ParseLink(spec.Link, k8res)
+		if err != nil {
+			return err
+		}
+		if !k8res.IsResource(manage.Pod) && vm.DeletionTimestamp == nil {
+			return fmt.Errorf("floating Ip only support pod link!")
+		} else {
+			nsname = k8res.NamespaceName()
+		}
+	}
 	if vm.DeletionTimestamp != nil {
 		removeRes = true
-		return nil
+		return
 	}
+	err := validPip(spec)
+	if err != nil {
+		return err
+	}
+
 	if spec.Link == "" {
 		// Try find {portId,fixip} from loadbalance info
 		lbres := p.Lb.GetResource(vm)
@@ -225,22 +239,11 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		id = lbres.CreateTime
 	} else {
 		// Try find {portId,fixip} from pod link
-		k8res := &manage.Resource{}
-		err = manage.ParseLink(spec.Link, k8res)
-		if err != nil {
-			return err
-		}
-		if !k8res.IsResource(manage.Pod) {
-			return fmt.Errorf("floating Ip only support pod link!")
-		}
-		nsname = k8res.NamespaceName()
 		ok, err := p.k8smgr.IsExist(k8res)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			// should remove Floatip if exist when k8s resource not found
-			removeRes = true
 			reterr = fmt.Errorf("k8s resource not found!")
 			return
 		}

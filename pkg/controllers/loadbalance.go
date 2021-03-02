@@ -231,30 +231,28 @@ func (p *LoadBalance) update(stat *vmv1.ResourceStatus) {
 
 func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	var (
-		spec             = vm.Spec.LoadBalance
-		stat             = vm.Status.NetStatus
-		ips              []string
-		fnova, removeRes bool
-		k8sres           []*manage.Result
+		spec   = vm.Spec.LoadBalance
+		stat   = vm.Status.NetStatus
+		ips    []string
+		fnova  bool
+		k8sres []*manage.Result
 	)
 
 	if spec == nil {
 		return nil
 	}
-	err := validLbSpec(spec)
-	if err != nil {
-		return err
+	if spec.Link == "" {
+		fnova = true
 	}
-
 	defer func() {
-		//Remove stack if pod link not exist
-		if removeRes {
+		//Remove stack if pod link not
+		if vm.DeletionTimestamp != nil {
 			if vm.Status.NetStatus != nil {
 				klog.V(2).Infof("remove load balance resource")
-				p.heat.DeleteStack(vm.Status.NetStatus)
 				p.mu.Lock()
 				delete(p.lbs, vm.Status.NetStatus.Name)
 				p.mu.Unlock()
+				reterr = p.heat.Process(manage.Lb, vm)
 			}
 			if !fnova {
 				klog.V(2).Infof("remove link from k8s manager")
@@ -272,10 +270,13 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		}
 	}()
 	if vm.DeletionTimestamp != nil {
-		removeRes = true
-		return nil
+		return
 	}
-	if spec.Link == "" {
+	err := validLbSpec(spec)
+	if err != nil {
+		return err
+	}
+	if fnova {
 		// Try find poolmembers from nova info
 		ips = p.nova.GetAllIps(vm)
 		if len(ips) == 0 {
@@ -284,7 +285,6 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		}
 		sort.Strings(ips)
 		klog.V(2).Infof("update server(nova) ip list:%v", ips)
-		fnova = true
 	} else {
 		// Try find poolmembers ip from link
 		if !p.k8smgr.LinkIsExist(spec.Link) {
@@ -304,7 +304,7 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		for _, v := range k8sres {
 			ips = append(ips, v.Ip.String())
 		}
-		klog.V(2).Infof("find pod ip list:%v", ips)
+		klog.V(4).Infof("find pod ip list:%v", ips)
 	}
 	for i, _ := range spec.Ports {
 		spec.Ports[i].Ips = ips
@@ -312,7 +312,7 @@ func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	var resname string
 
 	if stat == nil || stat.StackName == "" {
-		resname = fmt.Sprintf("%s-%s", vm.Name, util.RandStr(5))
+		resname = fmt.Sprintf("%s-%s", vm.Name, util.RandStr(6))
 		vm.Status.NetStatus = &vmv1.ResourceStatus{
 			StackName: resname,
 		}

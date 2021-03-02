@@ -86,7 +86,11 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	if newvmobj.DeletionTimestamp != nil {
 		klog.V(2).Infof("object %s is deleting", req.String())
-		r.server.Process(newvmobj)
+		//if processs failed, should block
+		err = r.server.Process(newvmobj)
+		if err != nil {
+			return ctrl.Result{}, nil
+		}
 	} else {
 		klog.V(2).Infof("START Reconcile:%s", req.String())
 		switch newvmobj.Spec.AssemblyPhase {

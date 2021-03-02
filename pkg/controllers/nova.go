@@ -189,26 +189,22 @@ func (p *Nova) update(stat *vmv1.VirtualMachineStatus, netspec *vmv1.ServerSpec)
 
 func (p *Nova) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	var (
-		spec      = vm.Spec.Server
-		stat      = vm.Status.VmStatus
-		removeRes bool
+		spec = vm.Spec.Server
+		stat = vm.Status.VmStatus
 	)
 	if spec == nil {
 		return nil
 	}
-	err := validVmSpec(spec)
-	if err != nil {
-		return err
-	}
+
 	if spec.Name == "" {
 		spec.Name = "vm"
 	}
 	defer func() {
 		//Remove stack if pod link not exist
-		if removeRes {
+		if vm.DeletionTimestamp != nil {
 			if vm.Status.VmStatus != nil {
 				klog.V(2).Infof("remove nova resource")
-				p.heat.DeleteStack(vm.Status.VmStatus)
+				reterr = p.heat.DeleteStack(vm.Status.VmStatus)
 				p.mu.Lock()
 				delete(p.vms, vm.Status.VmStatus.StackName)
 				p.mu.Unlock()
@@ -222,8 +218,11 @@ func (p *Nova) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		}
 	}()
 	if vm.DeletionTimestamp != nil {
-		removeRes = true
-		return nil
+		return
+	}
+	err := validVmSpec(spec)
+	if err != nil {
+		return err
 	}
 	// 1. prefixName used as filter prefix key
 	// 2. rand string to dict same name

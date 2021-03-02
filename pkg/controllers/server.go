@@ -47,26 +47,30 @@ func (m *Server) ServerRecocile(vm *vmv1.VirtualMachine) {
 	//todo
 }
 
-func (m *Server) Process(vm *vmv1.VirtualMachine) {
+func (m *Server) Process(vm *vmv1.VirtualMachine) error {
 	var (
 		err error
 	)
 	if vm.Spec.Auth == nil {
 		updateCondition(&vm.Status, OpCheck, fmt.Errorf("not found auth info"))
-		return
+		return nil
 	}
 	err = m.nova.Process(vm)
 	if err != nil {
 		updateCondition(&vm.Status, manage.Vm.String(), err)
+		return err
 	}
 	err = m.lb.Process(vm)
 	if err != nil {
 		updateCondition(&vm.Status, manage.Lb.String(), err)
+		return err
 	}
 	err = m.fip.Process(vm)
 	if err != nil {
 		updateCondition(&vm.Status, manage.Fip.String(), err)
+		return err
 	}
+	return nil
 }
 
 func (m *Server) NeedLeaderElection() bool {

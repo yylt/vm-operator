@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -217,6 +218,7 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) (reterr 
 		return fmt.Errorf("not found openstack resource %v", kind)
 	}
 	if vm.DeletionTimestamp != nil {
+		stat.Stat = string(vmv1.Deleting)
 		err := h.DeleteStack(stat)
 		if err != nil {
 			klog.Errorf("delete stack failed:%v", err)
@@ -242,7 +244,9 @@ func (h *Heat) Process(kind manage.OpResource, vm *vmv1.VirtualMachine) (reterr 
 		if err != nil {
 			klog.Errorf("Creat stack failed:%v", err)
 			if stat.StackID == "" {
-				return err
+				// stackname should remove, will generate new one next
+				stat.StackName = ""
+				return h.update(stat)
 			}
 		}
 		stat.HashId = hashid
@@ -356,6 +360,7 @@ func (h *Heat) createStack(fpath string, auth *vmv1.AuthSpec, stat *vmv1.Resourc
 	if err != nil {
 		klog.Errorf("create stack failed:%v", err)
 	}
+	err = fmt.Errorf("create stack failed, but no reason")
 	return err
 }
 
@@ -384,14 +389,18 @@ func (h *Heat) DeleteStack(stat *vmv1.ResourceStatus) error {
 		}
 		err = stacks.Delete(heatcli, stat.StackName, stat.StackID).ExtractErr()
 		if err != nil {
-			klog.Errorf("failed delete stack: %v", err)
-		} else {
+			klog.Errorf("failed delete stack: %v, err type: %v", err, reflect.TypeOf(err))
+			if _, ok := err.(gophercloud.ErrDefault404); ok {
+				err = nil
+			}
+		}
+		if err == nil {
 			stat.StackID = ""
 			stat.StackName = ""
 			klog.V(2).Infof("success delete stack")
 		}
 	})
-	return nil
+	return err
 }
 
 func (h *Heat) GetStack(id string) *StackResult {
