@@ -2,29 +2,25 @@ package template
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 
 	vmv1 "easystack.io/vm-operator/pkg/api/v1"
-	"github.com/go-logr/logr"
 	"github.com/tidwall/gjson"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/yaml"
 )
 
 var (
-	log    logr.Logger
 	engine *Template
 )
 
 func init() {
-	log = zap.New(zap.WriteTo(os.Stdout))
-	engine = NewTemplate(log)
+
+	engine = NewTemplate()
 }
 
 func TestAddTempFileMust(t *testing.T) {
-	engine.AddTempFileMust("net", "./files/loadbalance.tpl")
-	engine.AddTempFileMust("vm", "./files/vm.tpl")
-	engine.AddTempFileMust("vmg", "./files/vm_group.yaml.tpl")
+	engine.AddTempFileMust(Lb, "./files/loadbalance.tpl")
+	engine.AddTempFileMust(Vm, "./files/vm.tpl")
 }
 
 func TestRenderByName(t *testing.T) {
@@ -37,7 +33,7 @@ func TestRenderByName(t *testing.T) {
 		vmv1.VirtualMachineSpec{
 			Auth: &vmv1.AuthSpec{},
 			Server: &vmv1.ServerSpec{
-				Replicas:   2,
+				Replicas:   1,
 				Name:       "abc",
 				BootImage:  "a.iso",
 				BootVolume: volume,
@@ -57,18 +53,44 @@ func TestRenderByName(t *testing.T) {
 				Subnet: &vmv1.SubnetSpec{
 					SubnetId: "default",
 				},
-				LbIp: "1.1.1.1",
-				Name: "net",
+				LbIp:       "1.1.1.1",
+				Name:       "net",
+				UseService: true,
 				Ports: []*vmv1.PortMap{
 					&vmv1.PortMap{
-						Ips:      []string{"1.2.3.4", "1.1.1.1"},
-						Port:     0,
+						Ips:      []string{"", "1.1.1.1"},
+						Port:     20,
+						PodPort:  80,
 						Protocol: "TCP",
 					},
 				},
 			},
-
 			AssemblyPhase: "",
+		},
+		vmv1.VirtualMachineSpec{
+			LoadBalance: &vmv1.LoadBalanceSpec{
+				Subnet: &vmv1.SubnetSpec{
+					SubnetId: "default",
+				},
+				Name: "net",
+				Ports: []*vmv1.PortMap{
+					&vmv1.PortMap{
+						Ips:      []string{"", "1.1.1.1"},
+						Port:     10,
+						Protocol: "TCP",
+					},
+					&vmv1.PortMap{
+						Ips:      []string{"4.4.4.4"},
+						Port:     0,
+						Protocol: "",
+					},
+					&vmv1.PortMap{
+						Ips:      []string{"2.2.2.2"},
+						Port:     20,
+						Protocol: "TCP",
+					},
+				},
+			},
 		},
 	}
 	for _, v := range paramlist {
@@ -77,9 +99,31 @@ func TestRenderByName(t *testing.T) {
 			t.Fatalf(err.Error())
 		}
 		params := Parse(gjson.ParseBytes(bs))
-		bs, err = engine.RenderByName("vm", params)
+		bs, err = engine.RenderByName(Vm, params)
 		t.Logf("vm: %s err:%s", bs, err)
-		bs, err = engine.RenderByName("net", params)
+		bs, err = engine.RenderByName(Lb, params)
+
+		jsonbs, err := yaml.YAMLToJSON(bs)
+		if err != nil {
+			//panic(err)
+			t.Log("YAMLToJSON failed:", err)
+		}
 		t.Logf("net: %s err:%s", bs, err)
+
+		FindLbMembers(jsonbs, "net", func(_ int, value *gjson.Result) {
+			if value.IsObject() {
+				ipaddr := value.Get("address").String()
+				t.Log("find address:", ipaddr)
+			}
+		})
+
+		FindLbListens(jsonbs, "net", func(_ int, value *gjson.Result) {
+			if value.IsObject() {
+				proto := value.Get("protocol").String()
+				port := value.Get("protocol_port").Int()
+				t.Log("find proto:", proto, "find port:", port)
+			}
+		})
+
 	}
 }

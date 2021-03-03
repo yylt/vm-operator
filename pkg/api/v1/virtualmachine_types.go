@@ -17,7 +17,6 @@ limitations under the License.
 package v1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -27,27 +26,48 @@ const (
 	Creating AssemblyPhaseType = "Creating"
 	Updating AssemblyPhaseType = "Updating"
 	Deleting AssemblyPhaseType = "Deleting"
+	Stop     AssemblyPhaseType = "Stop"
+	Start    AssemblyPhaseType = "Start"
+	Recreate AssemblyPhaseType = "Recreate"
 )
 
 // VirtualMachineSpec defines the desired state of VirtualMachine
 type VirtualMachineSpec struct {
-	Auth          *AuthSpec         `json:"auth,omitempty"`
+	Auth          *AuthSpec         `json:"auth"`
 	Server        *ServerSpec       `json:"server,omitempty"`
 	LoadBalance   *LoadBalanceSpec  `json:"loadbalance,omitempty"`
-	AssemblyPhase AssemblyPhaseType `json:"assemblyPhase,omitempty"`
+	AssemblyPhase AssemblyPhaseType `json:"assemblyPhase"`
+	Public        *PublicSepc       `json:"publicip,omitempty"`
 }
 
 type AuthSpec struct {
-	ProjectID        string `json:"projectID,omitempty"`
-	Token            string `json:"token,omitempty"`
-	CredentialID     string `json:"credentialID,omitempty"`
-	CredentialName   string `json:"credentialName,omitempty"`
-	CredentialSecret string `json:"credentialSecret,omitempty"`
+	ProjectID string `json:"projectID"`
+	Token     string `json:"token"`
+}
+
+type PortMap struct {
+	Ips      []string `json:"ips,omitempty"`
+	Port     int32    `json:"port"`
+	PodPort  int32    `json:"pod_port,omitempty"` //default same with port
+	Protocol string   `json:"protocol"`
+}
+
+type SubnetSpec struct {
+	NetworkName string `json:"network_name"`
+	NetworkId   string `json:"network_id"`
+	SubnetName  string `json:"subnet_name"`
+	SubnetId    string `json:"subnet_id"`
+}
+
+type VolumeSpec struct {
+	VolumeDeleteByVm bool   `json:"volume_delete"`
+	VolumeType       string `json:"volume_type"`
+	VolumeSize       int32  `json:"volume_size"`
 }
 
 type ServerSpec struct {
 	Replicas       int32         `json:"replicas"`
-	Name           string        `json:"name"`
+	Name           string        `json:"name,omitempty"`
 	BootImage      string        `json:"boot_image,omitempty"`
 	BootVolumeId   string        `json:"boot_volume_id,omitempty"`
 	Flavor         string        `json:"flavor"`
@@ -63,68 +83,67 @@ type ServerSpec struct {
 }
 
 type LoadBalanceSpec struct {
-	Subnet *SubnetSpec `json:"subnet"`
-	LbIp   string      `json:"loadbalance_ip"`
-	Name   string      `json:"name"`
-	Ports  []*PortMap  `json:"port_map,omitempty"`
-	Link   string      `json:"link,omitempty"`
+	Subnet     *SubnetSpec `json:"subnet"`
+	Ports      []*PortMap  `json:"port_map,omitempty"`
+	Name       string      `json:"name"`
+	LbIp       string      `json:"loadbalance_ip,omitempty"`
+	Link       string      `json:"link,omitempty"`
+	UseService bool        `json:"use_service,omitempty"`
 }
 
-type SubnetSpec struct {
-	NetworkName string `json:"network_name,omitempty"`
-	NetworkId   string `json:"network_id,omitempty"`
-	SubnetName  string `json:"subnet_name,omitempty"`
-	SubnetId    string `json:"subnet_id"`
+type PublicSepc struct {
+	Mbps    int64       `json:"Mbps,omitempty"`
+	Subnet  *SubnetSpec `json:"subnet,omitempty"`
+	Address *Address    `json:"address"`
+
+	Link      string `json:"link,omitempty"`
+	Name      string `json:"name,omitempty"`
+	PortId    string `json:"port_id,omitempty"`
+	FixIp     string `json:"fixed_ip,omitempty"`
+	FloatIpId string `json:"float_id,omitempty"`
+
+	//Nonsync: sync public ip or not.
+	NonSync bool `json:"non_sync,omitempty"`
 }
 
-type VolumeSpec struct {
-	VolumeDeleteByVm bool   `json:"volume_delete"`
-	VolumeType       string `json:"volume_type"`
-	VolumeSize       int32  `json:"volume_size"`
+type Address struct {
+	Allocate bool   `json:"allocate,omitempty"`
+	Ip       string `json:"ip,omitempty"`
 }
 
-type PortMap struct {
-	Ips      []string `json:"ips,omitempty"` //update by members or links
-	Port     int32    `json:"port"`
-	Protocol string   `json:"protocol"`
-}
-
-// VirtualMachineStatus defines the observed state of VirtualMachine
 type VirtualMachineStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
 	VmStatus   *ResourceStatus `json:"vmStatus,omitempty"`
 	NetStatus  *ResourceStatus `json:"netStatus,omitempty"`
+	PubStatus  *ResourceStatus `json:"pubStatus,omitempty"`
 	Members    []*ServerStat   `json:"members,omitempty"`
 	Conditions []*Condition    `json:"conditions,omitempty"`
 }
 
 type Condition struct {
-	LastUpdateTime string                 `json:"lastUpdateTime,omitempty"`
-	Type           string                 `json:"type,omitempty"` //should add Ready type for application
-	Reason         string                 `json:"reason,omitempty"`
-	Status         corev1.ConditionStatus `json:"status,omitempty"`
+	LastUpdateTime string `json:"lastUpdateTime,omitempty"`
+	Type           string `json:"type,omitempty"` //should add Ready type for application
+	Reason         string `json:"reason,omitempty"`
 }
 
 type ServerStat struct {
 	Id         string `json:"id,omitempty"`
 	CreateTime string `json:"creationTimestamp,omitempty"`
-	Stat       string `json:"status,omitempty"`
-	Ip         string `json:"ip"`
-	Name       string `json:"name,omitempty"`
+	ResStat    string `json:"resstat,omitempty"`
+	Ip         string `json:"ip,omitempty"`
+	ResName    string `json:"resname,omitempty"`
 }
 
 type ResourceStatus struct {
-	StackID   string `json:"stackID,omitempty"`
-	StackName string `json:"stackName,omitempty"`
-	HashId    string `json:"hashid"`
-	Name      string `json:"name"`
-	Stat      string `json:"phase,omitempty"`
-	Template  string `json:"template,omitempty"`
+	ServerStat ServerStat `json:"serverStat,omitempty"`
+	StackID    string     `json:"stackID,omitempty"`
+	StackName  string     `json:"stackName,omitempty"`
+	HashId     int64      `json:"hashid"`
+	Name       string     `json:"name"`
+	Stat       string     `json:"phase,omitempty"`
+	Template   string     `json:"template,omitempty"`
 }
 
 // +kubebuilder:object:root=true
-
 // VirtualMachine is the Schema for the virtualmachines API
 type VirtualMachine struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -135,7 +154,6 @@ type VirtualMachine struct {
 }
 
 // +kubebuilder:object:root=true
-
 // VirtualMachineList contains a list of VirtualMachine
 type VirtualMachineList struct {
 	metav1.TypeMeta `json:",inline"`
