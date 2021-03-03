@@ -364,7 +364,6 @@ func (h *Heat) createStack(fpath string, auth *vmv1.AuthSpec, stat *vmv1.Resourc
 	return err
 }
 
-//TODO error always is nil
 func (h *Heat) DeleteStack(stat *vmv1.ResourceStatus) error {
 	var (
 		err error

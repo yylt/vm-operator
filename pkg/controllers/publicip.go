@@ -175,11 +175,11 @@ func (p *Floatip) update(spec *vmv1.PublicSepc, stat *vmv1.ResourceStatus) {
 
 func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	var (
-		spec           = vm.Spec.Public
-		stat           = vm.Status.PubStatus
-		nsname, ip, id string
-		removeRes      bool
-		k8res          = &manage.Resource{}
+		spec                     = vm.Spec.Public
+		stat                     = vm.Status.PubStatus
+		nsname, ip, id           string
+		removeRes, justCheckSync bool
+		k8res                    = &manage.Resource{}
 	)
 
 	if spec == nil {
@@ -244,7 +244,7 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 			return err
 		}
 		if !ok {
-			reterr = fmt.Errorf("k8s resource not found!")
+			reterr = fmt.Errorf("pod %s not found", nsname)
 			return
 		}
 		portres := p.portop.ListenByName(nsname)
@@ -278,6 +278,21 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	// 2. port id
 	// 3. lb ip (fix address ip)
 	p.listenByPortId(spec.PortId, stat)
+	if spec.Address == nil {
+		justCheckSync = true
+	}
+	if spec.Address.Ip == "" && spec.Address.Allocate == false {
+		justCheckSync = true
+	}
+	if justCheckSync {
+		klog.V(2).Infof("floating ip bind will sync: %v", !spec.NonSync)
+		if spec.NonSync == true {
+			reterr = fmt.Errorf("floating ip not need sync")
+			return reterr
+		}
+		return nil
+	}
+	klog.V(2).Infof("floating ip bind static ip:%v, allocate:%v", spec.Address.Ip, spec.Address.Allocate)
 	if spec.Address.Ip != "" {
 		spec.FloatIpId = p.findFloatingId(spec.Address.Ip)
 		if spec.FloatIpId == "" {
@@ -285,11 +300,7 @@ func (p *Floatip) Process(vm *vmv1.VirtualMachine) (reterr error) {
 		}
 	}
 
-	err = p.heat.Process(manage.Fip, vm)
-	if err != nil {
-		return err
-	}
-	return nil
+	return p.heat.Process(manage.Fip, vm)
 }
 
 func (p *Floatip) Stat(vm *vmv1.VirtualMachine) *vmv1.ResourceStatus {
@@ -300,14 +311,10 @@ func (p *Floatip) Stat(vm *vmv1.VirtualMachine) *vmv1.ResourceStatus {
 }
 
 func validPip(pi *vmv1.PublicSepc) error {
-	if pi.Address == nil {
-		return fmt.Errorf("not found address")
-	}
-	if pi.Address.Allocate == false && pi.Address.Ip == "" {
-		return fmt.Errorf("address not define")
-	}
-	if pi.Address.Allocate == true && pi.Address.Ip != "" {
-		return fmt.Errorf("address must set one about allocate and ip ")
+	if pi.Address != nil {
+		if pi.Address.Allocate == true && pi.Address.Ip != "" {
+			return fmt.Errorf("address allocate and ip must can not both setted.")
+		}
 	}
 
 	pi.Name = ""

@@ -231,15 +231,20 @@ func (p *LoadBalance) update(stat *vmv1.ResourceStatus) {
 
 func (p *LoadBalance) Process(vm *vmv1.VirtualMachine) (reterr error) {
 	var (
-		spec   = vm.Spec.LoadBalance
-		stat   = vm.Status.NetStatus
-		ips    []string
-		fnova  bool
-		k8sres []*manage.Result
+		spec    = vm.Spec.LoadBalance
+		fipSpec = vm.Spec.Public
+		stat    = vm.Status.NetStatus
+		ips     []string
+		fnova   bool
+		k8sres  []*manage.Result
 	)
 
 	if spec == nil {
 		return nil
+	}
+	//sync floating ip forever, attach fip could be operator in web
+	if fipSpec == nil {
+		vm.Spec.Public = &vmv1.PublicSepc{}
 	}
 	if spec.Link == "" {
 		fnova = true

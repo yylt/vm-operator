@@ -101,6 +101,9 @@ type PublicSepc struct {
 	PortId    string `json:"port_id,omitempty"`
 	FixIp     string `json:"fixed_ip,omitempty"`
 	FloatIpId string `json:"float_id,omitempty"`
+
+	//Nonsync: sync public ip or not.
+	NonSync bool `json:"non_sync,omitempty"`
 }
 
 type Address struct {

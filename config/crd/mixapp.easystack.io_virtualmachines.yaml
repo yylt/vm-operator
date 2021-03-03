@@ -116,6 +116,9 @@ spec:
                   type: string
                 name:
                   type: string
+                non_sync:
+                  description: 'Nonsync: sync public ip or not.'
+                  type: boolean
                 port_id:
                   type: string
                 subnet:
