@@ -1,4 +1,4 @@
-module easystack.io/vm-operator
+module easystack.io/vm-operator/v2
 
 go 1.13
 
